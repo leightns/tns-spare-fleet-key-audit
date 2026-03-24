@@ -97,41 +97,103 @@ app.post("/api/analyze", upload.single("photo"), async (req, res) => {
 
 TASK: Identify every vehicle number printed on key tags/fobs that have The Next Street branding (the logo features an "X" mark).
 
+STEP 1: First, carefully scan the entire image and count the total number of Next Street branded key tags you can see. State this count.
+STEP 2: Now systematically go through each key tag, working left-to-right, top-to-bottom. For each tag, read the vehicle number.
+
 RULES:
 - Read ONLY numbers on Next Street branded key tags. Ignore house keys, personal keys, or non-branded tags.
 - Vehicle numbers are typically 2-4 digit numbers (e.g. 44, 201, 252, 1023).
 - Some tags may be partially obscured, upside down, or at an angle - do your best to read them.
 - If a number is partially legible, include your best guess with a "?" suffix (e.g. "44?").
-- Look carefully at every key in the image. Count the total keys you see and make sure you identify a number for each Next Street key.
 - Common OCR confusions: 1 vs 7, 3 vs 8, 5 vs 6, 0 vs O. Use context (these are vehicle numbers) to resolve ambiguity.
+- IMPORTANT: Your array length MUST match the count of key tags from Step 1. If it doesn't, re-examine the image for missed keys.
 
-Return ONLY a JSON array of strings, e.g. ["201", "252", "283"]. No other text.`;
+Return a JSON object with this exact format:
+{"count": <number of Next Street key tags seen>, "numbers": ["201", "252", "283"]}
+Return ONLY this JSON object, no other text.`;
 
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64Image },
-            },
-            { type: "text", text: ocrPrompt },
-          ],
-        },
-      ],
+    // Run 3 parallel passes for consistency
+    const imageContent = {
+      type: "image",
+      source: { type: "base64", media_type: mediaType, data: base64Image },
+    };
+
+    const passes = await Promise.all([
+      client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt }] }],
+      }),
+      client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + "\n\nLook especially carefully at keys that may be overlapping, at angles, or partially hidden behind other keys." }] }],
+      }),
+      client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + "\n\nTry rotating your perspective mentally - some tags may be upside down or sideways. Be thorough." }] }],
+      }),
+    ]);
+
+    // Parse each pass
+    const passResults = passes.map((response, i) => {
+      const text = response.content[0].text.trim();
+      // Try to parse as JSON object with count
+      const objMatch = text.match(/\{[\s\S]*\}/);
+      if (objMatch) {
+        try {
+          const parsed = JSON.parse(objMatch[0]);
+          return { count: parsed.count || 0, numbers: (parsed.numbers || []).map(String) };
+        } catch {}
+      }
+      // Fallback: try array
+      const arrMatch = text.match(/\[[\s\S]*\]/);
+      if (arrMatch) {
+        try {
+          const nums = JSON.parse(arrMatch[0]).map(String);
+          return { count: nums.length, numbers: nums };
+        } catch {}
+      }
+      console.warn(`Pass ${i + 1} failed to parse:`, text);
+      return { count: 0, numbers: [] };
     });
 
-    const text = response.content[0].text.trim();
-    const match = text.match(/\[[\s\S]*\]/);
-    if (match) {
-      const numbers = JSON.parse(match[0]);
-      res.json({ numbers });
-    } else {
-      res.json({ numbers: [], raw: text });
-    }
+    // Merge: union of all numbers found across passes, track frequency
+    const freq = {};
+    let maxCount = 0;
+    passResults.forEach(p => {
+      if (p.count > maxCount) maxCount = p.count;
+      p.numbers.forEach(n => {
+        const clean = n.replace(/\?$/, "");
+        const isUncertain = n.endsWith("?");
+        if (!freq[clean]) freq[clean] = { seen: 0, uncertain: 0 };
+        freq[clean].seen++;
+        if (isUncertain) freq[clean].uncertain++;
+      });
+    });
+
+    // Build merged result: include all numbers, mark uncertain if only seen once or flagged
+    const merged = Object.entries(freq).map(([num, f]) => {
+      if (f.seen === 1 && passResults.length > 1) return num + "?"; // Only one pass saw it
+      if (f.uncertain > f.seen / 2) return num + "?"; // Majority uncertain
+      return num;
+    });
+
+    // Sort numerically
+    merged.sort((a, b) => {
+      const na = parseInt(a.replace("?", ""));
+      const nb = parseInt(b.replace("?", ""));
+      return na - nb;
+    });
+
+    console.log(`OCR passes found: [${passResults.map(p => p.numbers.length).join(", ")}] keys. Merged: ${merged.length}. Expected: ${maxCount}`);
+
+    res.json({
+      numbers: merged,
+      expectedCount: maxCount,
+      passDetails: passResults.map(p => ({ count: p.count, found: p.numbers.length })),
+    });
   } catch (err) {
     console.error("Anthropic API error:", err.message);
     res.status(500).json({ error: "Failed to analyze image: " + err.message });
