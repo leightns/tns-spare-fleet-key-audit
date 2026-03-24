@@ -6,7 +6,19 @@ const path = require("path");
 const Anthropic = require("@anthropic-ai/sdk").default;
 
 const app = express();
+app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+// Audit log file
+const AUDIT_LOG_PATH = path.join(__dirname, "audit_log.json");
+function loadAuditLog() {
+  try {
+    return JSON.parse(fs.readFileSync(AUDIT_LOG_PATH, "utf-8"));
+  } catch { return []; }
+}
+function saveAuditLog(log) {
+  fs.writeFileSync(AUDIT_LOG_PATH, JSON.stringify(log, null, 2));
+}
 
 // Load vehicle roster CSV at startup
 function loadRoster() {
@@ -81,6 +93,20 @@ app.post("/api/analyze", upload.single("photo"), async (req, res) => {
   const mediaType = req.file.mimetype || "image/jpeg";
 
   try {
+    const ocrPrompt = `You are analyzing a photo of vehicle spare keys laid out on a table for a fleet management audit.
+
+TASK: Identify every vehicle number printed on key tags/fobs that have The Next Street branding (the logo features an "X" mark).
+
+RULES:
+- Read ONLY numbers on Next Street branded key tags. Ignore house keys, personal keys, or non-branded tags.
+- Vehicle numbers are typically 2-4 digit numbers (e.g. 44, 201, 252, 1023).
+- Some tags may be partially obscured, upside down, or at an angle - do your best to read them.
+- If a number is partially legible, include your best guess with a "?" suffix (e.g. "44?").
+- Look carefully at every key in the image. Count the total keys you see and make sure you identify a number for each Next Street key.
+- Common OCR confusions: 1 vs 7, 3 vs 8, 5 vs 6, 0 vs O. Use context (these are vehicle numbers) to resolve ambiguity.
+
+Return ONLY a JSON array of strings, e.g. ["201", "252", "283"]. No other text.`;
+
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1024,
@@ -92,17 +118,13 @@ app.post("/api/analyze", upload.single("photo"), async (req, res) => {
               type: "image",
               source: { type: "base64", media_type: mediaType, data: base64Image },
             },
-            {
-              type: "text",
-              text: 'Look at this photo of vehicle keys on a table. Identify ONLY the vehicle numbers printed on key tags that have The Next Street branding (logo with an X). Ignore all other text, numbers, labels, or markings in the image that are not on Next Street branded key tags. Return the vehicle numbers as a JSON array of strings, e.g. ["201", "252", "283"]. If you cannot confidently read a number, include it with a question mark suffix, e.g. "44?". Return ONLY the JSON array, no other text.',
-            },
+            { type: "text", text: ocrPrompt },
           ],
         },
       ],
     });
 
     const text = response.content[0].text.trim();
-    // Extract JSON array from response
     const match = text.match(/\[[\s\S]*\]/);
     if (match) {
       const numbers = JSON.parse(match[0]);
@@ -114,6 +136,23 @@ app.post("/api/analyze", upload.single("photo"), async (req, res) => {
     console.error("Anthropic API error:", err.message);
     res.status(500).json({ error: "Failed to analyze image: " + err.message });
   }
+});
+
+// Audit log API
+app.post("/api/audit-log", (req, res) => {
+  const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    timestamp: new Date().toISOString(),
+    ...req.body,
+  };
+  const log = loadAuditLog();
+  log.unshift(entry);
+  saveAuditLog(log);
+  res.json({ ok: true, id: entry.id });
+});
+
+app.get("/api/audit-log", (_req, res) => {
+  res.json(loadAuditLog());
 });
 
 // Serve static files

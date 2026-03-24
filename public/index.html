@@ -403,12 +403,95 @@
       margin-bottom: 16px;
       font-size: 14px;
     }
+
+    .audit-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .audit-meta label { margin-bottom: 4px; }
+
+    .audit-meta input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      font-size: 15px;
+    }
+
+    .audit-meta input:focus {
+      outline: none;
+      border-color: var(--primary-light);
+    }
+
+    .history-btn {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: white;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .history-btn:hover { background: rgba(255,255,255,0.25); }
+
+    .log-entry {
+      background: var(--card);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      cursor: pointer;
+      transition: box-shadow 0.2s;
+    }
+
+    .log-entry:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+
+    .log-entry .log-location { font-weight: 700; color: var(--primary); font-size: 15px; }
+    .log-entry .log-date { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+    .log-entry .log-meta { font-size: 13px; color: var(--text); margin-top: 6px; }
+    .log-entry .log-counts {
+      display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;
+    }
+    .log-entry .log-counts span {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600;
+    }
+    .log-counts .c-belong { background: #d1fae5; color: var(--success); }
+    .log-counts .c-elsewhere { background: #dbeafe; color: var(--info); }
+    .log-counts .c-offboard { background: #fee2e2; color: var(--danger); }
+    .log-counts .c-missing { background: #fef3c7; color: var(--warning); }
+
+    .log-detail {
+      display: none;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      color: var(--text-light);
+    }
+
+    .log-entry.expanded .log-detail { display: block; }
+
+    .add-number-help {
+      font-size: 11px;
+      color: var(--text-light);
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
-  <div class="header">
+  <div class="header" style="position:relative;">
     <h1>THE NEXT STREET</h1>
     <div class="subtitle">Spare Key Audit</div>
+    <button class="history-btn" id="btn-history">History</button>
   </div>
 
   <div class="container">
@@ -437,6 +520,20 @@
         <img id="photo-preview" class="photo-preview" style="display:none" alt="Key photo preview">
       </div>
 
+      <div class="card">
+        <h2>3. Audit Details</h2>
+        <div class="audit-meta">
+          <div>
+            <label for="auditor-input">Auditor</label>
+            <input type="text" id="auditor-input" placeholder="Your name">
+          </div>
+          <div>
+            <label for="acknowledger-input">Acknowledges Receipt</label>
+            <input type="text" id="acknowledger-input" placeholder="Name">
+          </div>
+        </div>
+      </div>
+
       <button id="btn-analyze" class="btn btn-primary" disabled>Analyze Key Tags</button>
     </div>
 
@@ -449,9 +546,10 @@
         </p>
         <div id="chip-list" class="chip-list"></div>
         <div class="add-number">
-          <input type="text" id="add-number-input" placeholder="Add number..." inputmode="numeric">
+          <input type="text" id="add-number-input" placeholder="Add numbers..." inputmode="text">
           <button class="btn btn-sm btn-primary" id="btn-add-number">Add</button>
         </div>
+        <div class="add-number-help">Separate multiple numbers with commas or spaces (e.g. "201, 252, 283")</div>
       </div>
       <button id="btn-confirm" class="btn btn-accent">Confirm &amp; Run Audit</button>
       <div style="margin-top:8px;">
@@ -466,6 +564,16 @@
         <button id="btn-new-audit" class="btn btn-primary">New Audit</button>
         <button id="btn-export" class="btn btn-outline">Copy Summary</button>
       </div>
+    </div>
+
+    <!-- Audit History -->
+    <div id="step-history" class="step">
+      <div class="card">
+        <h2>Audit History</h2>
+        <div id="history-list"></div>
+        <div id="history-empty" style="color:var(--text-light);font-size:14px;text-align:center;padding:20px;">No audits logged yet.</div>
+      </div>
+      <button id="btn-back-home" class="btn btn-outline" style="margin-top:8px;">Back</button>
     </div>
   </div>
 
@@ -484,6 +592,7 @@
   let locations = [];
   let confirmedNumbers = [];
   let photoDataUrl = null;
+  let lastAuditResult = null; // Store for logging
 
   // DOM elements
   const locationSelect = document.getElementById("location-select");
@@ -498,11 +607,15 @@
   const addNumberInput = document.getElementById("add-number-input");
   const chipList = document.getElementById("chip-list");
   const loading = document.getElementById("loading");
+  const auditorInput = document.getElementById("auditor-input");
+  const acknowledgerInput = document.getElementById("acknowledger-input");
+  const btnHistory = document.getElementById("btn-history");
 
   const steps = {
     capture: document.getElementById("step-capture"),
     confirm: document.getElementById("step-confirm"),
     results: document.getElementById("step-results"),
+    history: document.getElementById("step-history"),
   };
 
   function showStep(name) {
@@ -514,6 +627,13 @@
   function updateAnalyzeButton() {
     btnAnalyze.disabled = !(locationSelect.value && photoInput.files.length > 0);
   }
+
+  // Persist auditor name in localStorage
+  const savedAuditor = localStorage.getItem("tns_auditor");
+  if (savedAuditor) auditorInput.value = savedAuditor;
+  auditorInput.addEventListener("blur", () => {
+    localStorage.setItem("tns_auditor", auditorInput.value.trim());
+  });
 
   // Load data
   async function init() {
@@ -573,8 +693,8 @@
 
   locationSelect.addEventListener("change", updateAnalyzeButton);
 
-  // Analyze
-  btnAnalyze.addEventListener("click", async () => {
+  // Analyze photo
+  async function analyzePhoto() {
     const file = photoInput.files[0];
     if (!file || !locationSelect.value) return;
 
@@ -601,7 +721,9 @@
       loading.classList.remove("active");
       alert("Network error: " + err.message);
     }
-  });
+  }
+
+  btnAnalyze.addEventListener("click", analyzePhoto);
 
   // Chip rendering
   function renderChips() {
@@ -627,21 +749,30 @@
   });
 
   function addNumber() {
-    const val = addNumberInput.value.trim();
-    if (val && !confirmedNumbers.includes(val)) {
-      confirmedNumbers.push(val);
-      renderChips();
-      addNumberInput.value = "";
-    }
+    const raw = addNumberInput.value.trim();
+    if (!raw) return;
+    // Support comma, space, or semicolon separated batch entry
+    const vals = raw.split(/[\s,;]+/).map(v => v.trim()).filter(Boolean);
+    let added = 0;
+    vals.forEach(val => {
+      if (val && !confirmedNumbers.includes(val)) {
+        confirmedNumbers.push(val);
+        added++;
+      }
+    });
+    if (added > 0) renderChips();
+    addNumberInput.value = "";
   }
 
   // Back button
   document.getElementById("btn-back-capture").addEventListener("click", () => showStep("capture"));
 
   // Confirm & run audit
-  btnConfirm.addEventListener("click", () => {
+  btnConfirm.addEventListener("click", async () => {
     const selectedLocation = locationSelect.value;
     const auditTime = new Date();
+    const auditor = auditorInput.value.trim();
+    const acknowledger = acknowledgerInput.value.trim();
 
     // Clean numbers (remove trailing ?)
     const cleanNumbers = confirmedNumbers.map(n => n.replace(/\?$/, ""));
@@ -651,7 +782,6 @@
     const offboarded = [];
     const missing = [];
 
-    // Vehicles assigned to this location
     const locationVehicles = roster.filter(
       v => v.assigned_location === selectedLocation && v.status === "active"
     );
@@ -659,7 +789,6 @@
     cleanNumbers.forEach(num => {
       const vehicle = roster.find(v => v.vehicle_number === num);
       if (!vehicle) {
-        // Not found in roster at all
         offboarded.push({ vehicle_number: num, reason: "Not in roster" });
       } else if (vehicle.status === "offboard") {
         offboarded.push({ vehicle_number: num, reason: "Offboarded", current_address: vehicle.current_address });
@@ -670,7 +799,6 @@
       }
     });
 
-    // Missing: assigned here but key not found
     locationVehicles.forEach(v => {
       if (!cleanNumbers.includes(v.vehicle_number)) {
         missing.push(v);
@@ -678,16 +806,40 @@
     });
 
     const total = cleanNumbers.length;
+
+    // Store audit result for logging
+    lastAuditResult = {
+      location: selectedLocation,
+      auditor,
+      acknowledger,
+      totalKeys: total,
+      belongHere: belongHere.map(v => v.vehicle_number),
+      belongElsewhere: belongElsewhere.map(v => ({ num: v.vehicle_number, location: v.assigned_location })),
+      offboarded: offboarded.map(v => ({ num: v.vehicle_number, reason: v.reason })),
+      missing: missing.map(v => v.vehicle_number),
+    };
+
     const html = buildResultsHTML({
-      selectedLocation, auditTime, total,
+      selectedLocation, auditTime, total, auditor, acknowledger,
       belongHere, belongElsewhere, offboarded, missing
     });
 
     document.getElementById("results-content").innerHTML = html;
     showStep("results");
+
+    // Save to audit log
+    try {
+      await fetch("/api/audit-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lastAuditResult),
+      });
+    } catch (e) {
+      console.warn("Failed to save audit log:", e);
+    }
   });
 
-  function buildResultsHTML({ selectedLocation, auditTime, total, belongHere, belongElsewhere, offboarded, missing }) {
+  function buildResultsHTML({ selectedLocation, auditTime, total, auditor, acknowledger, belongHere, belongElsewhere, offboarded, missing }) {
     const timeStr = auditTime.toLocaleString("en-US", {
       weekday: "short", year: "numeric", month: "short", day: "numeric",
       hour: "numeric", minute: "2-digit", hour12: true
@@ -695,18 +847,23 @@
 
     let html = "";
 
-    // Thumbnail
     if (photoDataUrl) {
       html += `<div class="thumbnail-row"><img src="${photoDataUrl}" alt="Audit photo"></div>`;
     }
 
-    // Summary
     html += `<div class="summary-bar">
       <div class="total">${total} key${total !== 1 ? "s" : ""} scanned at ${selectedLocation}</div>
       <div class="breakdown">
         ${belongHere.length} belong here · ${belongElsewhere.length} route elsewhere · ${offboarded.length} offboarded · ${missing.length} missing
-      </div>
-    </div>`;
+      </div>`;
+    if (auditor || acknowledger) {
+      html += `<div style="margin-top:6px;font-size:13px;opacity:0.85;">`;
+      if (auditor) html += `Auditor: ${auditor}`;
+      if (auditor && acknowledger) html += ` · `;
+      if (acknowledger) html += `Receipt: ${acknowledger}`;
+      html += `</div>`;
+    }
+    html += `</div>`;
 
     html += `<div class="timestamp">Audit performed: ${timeStr}</div>`;
 
@@ -788,46 +945,104 @@
     photoDrop.style.display = "";
     photoDataUrl = null;
     confirmedNumbers = [];
+    acknowledgerInput.value = "";
+    lastAuditResult = null;
     updateAnalyzeButton();
     showStep("capture");
   });
 
-  // Export / copy summary
+  // Export / copy summary with rich HTML formatting
   btnExport.addEventListener("click", () => {
     const selectedLocation = locationSelect.value;
     const sections = document.querySelectorAll(".result-section");
+    const timestampText = document.querySelector(".timestamp").textContent;
+    const totalText = document.querySelector(".summary-bar .total").textContent;
+    const breakdownText = document.querySelector(".summary-bar .breakdown").textContent.trim();
+    const auditor = auditorInput.value.trim();
+    const acknowledger = acknowledgerInput.value.trim();
+
+    // Build plain text version
     let text = `TNS Spare Key Audit - ${selectedLocation}\n`;
-    text += `${document.querySelector(".timestamp").textContent}\n`;
-    text += `${document.querySelector(".summary-bar .total").textContent}\n`;
-    text += `${document.querySelector(".summary-bar .breakdown").textContent}\n\n`;
+    text += `${timestampText}\n`;
+    if (auditor) text += `Auditor: ${auditor}\n`;
+    if (acknowledger) text += `Acknowledges Receipt: ${acknowledger}\n`;
+    text += `${totalText}\n`;
+    text += `${breakdownText}\n\n`;
+
+    // Build HTML version for rich paste
+    let html = `<h2 style="margin:0 0 4px;color:#1a3a5c;">TNS Spare Key Audit - ${selectedLocation}</h2>`;
+    html += `<p style="margin:0;color:#6b7280;font-size:13px;">${timestampText}</p>`;
+    if (auditor || acknowledger) {
+      html += `<p style="margin:4px 0;font-size:13px;">`;
+      if (auditor) html += `<strong>Auditor:</strong> ${auditor}`;
+      if (auditor && acknowledger) html += ` &nbsp;·&nbsp; `;
+      if (acknowledger) html += `<strong>Acknowledges Receipt:</strong> ${acknowledger}`;
+      html += `</p>`;
+    }
+    html += `<p style="margin:8px 0;"><strong>${totalText}</strong><br>${breakdownText}</p>`;
+
+    const sectionColors = { "section-belong": "#059669", "section-elsewhere": "#2563eb", "section-offboard": "#dc2626", "section-missing": "#d97706" };
 
     sections.forEach(section => {
       const title = section.querySelector("h3").textContent.replace(/\d+$/, "").trim();
+      const sectionClass = [...section.classList].find(c => c.startsWith("section-"));
+      const color = sectionColors[sectionClass] || "#1a3a5c";
+
       text += `--- ${title} ---\n`;
+      html += `<h3 style="margin:12px 0 4px;color:${color};border-bottom:2px solid ${color};padding-bottom:4px;">${title}</h3>`;
+
       const items = section.querySelectorAll(".result-item");
       if (items.length === 0) {
         text += "  None\n";
+        html += `<p style="color:#6b7280;font-style:italic;">None</p>`;
       } else {
+        html += `<table style="border-collapse:collapse;width:100%;font-size:14px;">`;
         items.forEach(item => {
           const num = item.querySelector(".vehicle-num").textContent;
           const badge = item.querySelector(".badge");
           const details = item.querySelectorAll(".detail");
           let line = `  ${num}`;
-          if (badge) line += ` [${badge.textContent}]`;
-          details.forEach(d => { line += ` - ${d.textContent}`; });
+          let htmlLine = `<tr><td style="padding:3px 8px 3px 0;font-weight:700;color:#1a3a5c;white-space:nowrap;">${num}</td><td style="padding:3px 0;">`;
+          if (badge) {
+            line += ` [${badge.textContent}]`;
+            htmlLine += `<span style="background:#dbeafe;color:#2563eb;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:600;">${badge.textContent}</span> `;
+          }
+          details.forEach(d => {
+            line += ` - ${d.textContent}`;
+            const isDanger = d.style.color && d.style.color.includes("danger");
+            htmlLine += `<span style="color:${isDanger ? '#dc2626' : '#6b7280'};font-size:12px;">${d.textContent}</span> `;
+          });
+          htmlLine += `</td></tr>`;
           text += line + "\n";
+          html += htmlLine;
         });
+        html += `</table>`;
       }
       text += "\n";
     });
 
-    if (navigator.clipboard) {
+    // Try rich clipboard first, fallback to plain text
+    if (navigator.clipboard && typeof ClipboardItem !== "undefined") {
+      const htmlBlob = new Blob([html], { type: "text/html" });
+      const textBlob = new Blob([text], { type: "text/plain" });
+      navigator.clipboard.write([
+        new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob })
+      ]).then(() => {
+        btnExport.textContent = "Copied!";
+        setTimeout(() => { btnExport.textContent = "Copy Summary"; }, 2000);
+      }).catch(() => {
+        // Fallback to plain text
+        navigator.clipboard.writeText(text).then(() => {
+          btnExport.textContent = "Copied!";
+          setTimeout(() => { btnExport.textContent = "Copy Summary"; }, 2000);
+        });
+      });
+    } else if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(() => {
         btnExport.textContent = "Copied!";
         setTimeout(() => { btnExport.textContent = "Copy Summary"; }, 2000);
       });
     } else {
-      // Fallback
       const ta = document.createElement("textarea");
       ta.value = text;
       document.body.appendChild(ta);
@@ -838,6 +1053,74 @@
       setTimeout(() => { btnExport.textContent = "Copy Summary"; }, 2000);
     }
   });
+
+  // History
+  btnHistory.addEventListener("click", async () => {
+    showStep("history");
+    const historyList = document.getElementById("history-list");
+    const historyEmpty = document.getElementById("history-empty");
+    historyList.innerHTML = "";
+
+    try {
+      const res = await fetch("/api/audit-log");
+      const log = await res.json();
+
+      if (log.length === 0) {
+        historyEmpty.style.display = "block";
+        return;
+      }
+      historyEmpty.style.display = "none";
+
+      log.forEach(entry => {
+        const d = new Date(entry.timestamp);
+        const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        const timeStr = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+
+        const div = document.createElement("div");
+        div.className = "log-entry";
+        div.innerHTML = `
+          <div class="log-location">${entry.location}</div>
+          <div class="log-date">${dateStr} at ${timeStr}</div>
+          <div class="log-meta">
+            ${entry.auditor ? `Auditor: <strong>${entry.auditor}</strong>` : ""}
+            ${entry.auditor && entry.acknowledger ? " · " : ""}
+            ${entry.acknowledger ? `Receipt: <strong>${entry.acknowledger}</strong>` : ""}
+          </div>
+          <div class="log-counts">
+            <span class="c-belong">${entry.belongHere ? entry.belongHere.length : 0} belong</span>
+            <span class="c-elsewhere">${entry.belongElsewhere ? entry.belongElsewhere.length : 0} elsewhere</span>
+            <span class="c-offboard">${entry.offboarded ? entry.offboarded.length : 0} offboard</span>
+            <span class="c-missing">${entry.missing ? entry.missing.length : 0} missing</span>
+          </div>
+          <div class="log-detail">${formatLogDetail(entry)}</div>
+        `;
+        div.addEventListener("click", () => div.classList.toggle("expanded"));
+        historyList.appendChild(div);
+      });
+    } catch (e) {
+      historyEmpty.textContent = "Failed to load audit history.";
+      historyEmpty.style.display = "block";
+    }
+  });
+
+  function formatLogDetail(entry) {
+    let text = "";
+    if (entry.belongHere && entry.belongHere.length) {
+      text += `Belong Here: ${entry.belongHere.map(n => "#" + n).join(", ")}\n`;
+    }
+    if (entry.belongElsewhere && entry.belongElsewhere.length) {
+      text += `Elsewhere: ${entry.belongElsewhere.map(v => "#" + v.num + " → " + v.location).join(", ")}\n`;
+    }
+    if (entry.offboarded && entry.offboarded.length) {
+      text += `Offboarded: ${entry.offboarded.map(v => "#" + v.num + " (" + v.reason + ")").join(", ")}\n`;
+    }
+    if (entry.missing && entry.missing.length) {
+      text += `Missing: ${entry.missing.map(n => "#" + n).join(", ")}\n`;
+    }
+    return text || "No details available.";
+  }
+
+  document.getElementById("btn-back-home").addEventListener("click", () => showStep("capture"));
 })();
 </script>
 </body>
