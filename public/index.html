@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>TNS Spare Key Audit</title>
+  <style>
+    :root {
+      --primary: #1a3a5c;
+      --primary-light: #2a5a8c;
+      --accent: #e8792f;
+      --bg: #f5f7fa;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --text-light: #6b7280;
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --info: #2563eb;
+      --border: #e5e7eb;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .header {
+      background: var(--primary);
+      color: white;
+      padding: 16px 20px;
+      text-align: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .header .subtitle {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-top: 2px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    .step {
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .step.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .card h2 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      color: var(--primary);
+    }
+
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      padding: 12px 14px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      font-size: 16px;
+      background: white;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    select:focus, input[type="text"]:focus {
+      outline: none;
+      border-color: var(--primary-light);
+    }
+
+    .select-wrapper {
+      position: relative;
+    }
+
+    .select-wrapper::after {
+      content: "▼";
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 10px;
+      color: var(--text-light);
+      pointer-events: none;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn-primary:hover { background: var(--primary-light); }
+    .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+
+    .btn-accent {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-accent:hover { background: #d06820; }
+
+    .btn-outline {
+      background: white;
+      color: var(--primary);
+      border: 2px solid var(--primary);
+    }
+
+    .btn-sm {
+      width: auto;
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+
+    .photo-upload {
+      border: 3px dashed var(--border);
+      border-radius: 12px;
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .photo-upload:hover, .photo-upload.dragover {
+      border-color: var(--primary-light);
+      background: #f0f4ff;
+    }
+
+    .photo-upload .icon { font-size: 40px; margin-bottom: 8px; }
+    .photo-upload p { font-size: 14px; color: var(--text-light); }
+
+    .photo-preview {
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: 8px;
+      margin-top: 12px;
+      object-fit: contain;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .loading-overlay.active { display: flex; }
+
+    .loading-box {
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      text-align: center;
+      max-width: 280px;
+    }
+
+    .loading-box .spinner-lg {
+      width: 48px;
+      height: 48px;
+      border: 4px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    /* Number chips for editing */
+    .chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: #e8f0fe;
+      border-radius: 20px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .chip .remove {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(0,0,0,0.15);
+      color: var(--primary);
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .chip.uncertain { background: #fef3c7; color: var(--warning); }
+
+    .add-number {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .add-number input { flex: 1; }
+
+    /* Results */
+    .summary-bar {
+      background: var(--primary);
+      color: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .summary-bar .total { font-size: 18px; font-weight: 700; }
+    .summary-bar .breakdown { opacity: 0.9; }
+
+    .timestamp {
+      font-size: 12px;
+      color: var(--text-light);
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .result-section {
+      margin-bottom: 16px;
+    }
+
+    .result-section h3 {
+      font-size: 14px;
+      font-weight: 700;
+      padding: 10px 16px;
+      border-radius: 8px 8px 0 0;
+      color: white;
+    }
+
+    .result-section h3 .count {
+      float: right;
+      background: rgba(255,255,255,0.25);
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    .section-belong h3 { background: var(--success); }
+    .section-elsewhere h3 { background: var(--info); }
+    .section-offboard h3 { background: var(--danger); }
+    .section-missing h3 { background: var(--warning); }
+
+    .result-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: white;
+      font-size: 14px;
+    }
+
+    .result-item:last-child {
+      border-bottom: none;
+      border-radius: 0 0 8px 8px;
+    }
+
+    .result-item .vehicle-num {
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--primary);
+    }
+
+    .result-item .detail {
+      color: var(--text-light);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .result-item .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+
+    .badge-location {
+      background: #dbeafe;
+      color: var(--info);
+    }
+
+    .badge-offboard {
+      background: #fee2e2;
+      color: var(--danger);
+    }
+
+    .actions-bar {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .actions-bar .btn { flex: 1; }
+
+    .thumbnail-row {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .thumbnail-row img {
+      max-width: 100%;
+      max-height: 120px;
+      border-radius: 8px;
+      border: 2px solid var(--border);
+    }
+
+    .empty-section {
+      padding: 12px 16px;
+      background: white;
+      border-radius: 0 0 8px 8px;
+      color: var(--text-light);
+      font-size: 13px;
+      font-style: italic;
+    }
+
+    .error-msg {
+      background: #fee2e2;
+      color: var(--danger);
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>THE NEXT STREET</h1>
+    <div class="subtitle">Spare Key Audit</div>
+  </div>
+
+  <div class="container">
+    <!-- Step 1: Select location & upload photo -->
+    <div id="step-capture" class="step active">
+      <div class="card">
+        <h2>1. Select Location</h2>
+        <label for="location-select">Office / Hub</label>
+        <div class="select-wrapper">
+          <select id="location-select">
+            <option value="">Choose a location...</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>2. Photograph Spare Keys</h2>
+        <p style="font-size:13px;color:var(--text-light);margin-bottom:12px;">
+          Spread all spare keys on a table with tags visible, then take a photo.
+        </p>
+        <div class="photo-upload" id="photo-drop">
+          <div class="icon">📸</div>
+          <p>Tap to take a photo or choose from camera roll</p>
+          <input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none">
+        </div>
+        <img id="photo-preview" class="photo-preview" style="display:none" alt="Key photo preview">
+      </div>
+
+      <button id="btn-analyze" class="btn btn-primary" disabled>Analyze Key Tags</button>
+    </div>
+
+    <!-- Step 2: Confirm extracted numbers -->
+    <div id="step-confirm" class="step">
+      <div class="card">
+        <h2>Extracted Vehicle Numbers</h2>
+        <p style="font-size:13px;color:var(--text-light);margin-bottom:12px;">
+          Review the numbers below. Remove any errors and add any missing numbers.
+        </p>
+        <div id="chip-list" class="chip-list"></div>
+        <div class="add-number">
+          <input type="text" id="add-number-input" placeholder="Add number..." inputmode="numeric">
+          <button class="btn btn-sm btn-primary" id="btn-add-number">Add</button>
+        </div>
+      </div>
+      <button id="btn-confirm" class="btn btn-accent">Confirm &amp; Run Audit</button>
+      <div style="margin-top:8px;">
+        <button id="btn-back-capture" class="btn btn-outline">Back</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Results -->
+    <div id="step-results" class="step">
+      <div id="results-content"></div>
+      <div class="actions-bar">
+        <button id="btn-new-audit" class="btn btn-primary">New Audit</button>
+        <button id="btn-export" class="btn btn-outline">Copy Summary</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading overlay -->
+  <div class="loading-overlay" id="loading">
+    <div class="loading-box">
+      <div class="spinner-lg"></div>
+      <p style="font-weight:600;color:var(--primary);">Analyzing key tags...</p>
+      <p style="font-size:13px;color:var(--text-light);margin-top:4px;">This may take a few seconds</p>
+    </div>
+  </div>
+
+<script>
+(function() {
+  let roster = [];
+  let locations = [];
+  let confirmedNumbers = [];
+  let photoDataUrl = null;
+
+  // DOM elements
+  const locationSelect = document.getElementById("location-select");
+  const photoInput = document.getElementById("photo-input");
+  const photoDrop = document.getElementById("photo-drop");
+  const photoPreview = document.getElementById("photo-preview");
+  const btnAnalyze = document.getElementById("btn-analyze");
+  const btnConfirm = document.getElementById("btn-confirm");
+  const btnNewAudit = document.getElementById("btn-new-audit");
+  const btnExport = document.getElementById("btn-export");
+  const btnAddNumber = document.getElementById("btn-add-number");
+  const addNumberInput = document.getElementById("add-number-input");
+  const chipList = document.getElementById("chip-list");
+  const loading = document.getElementById("loading");
+
+  const steps = {
+    capture: document.getElementById("step-capture"),
+    confirm: document.getElementById("step-confirm"),
+    results: document.getElementById("step-results"),
+  };
+
+  function showStep(name) {
+    Object.values(steps).forEach(s => s.classList.remove("active"));
+    steps[name].classList.add("active");
+    window.scrollTo(0, 0);
+  }
+
+  function updateAnalyzeButton() {
+    btnAnalyze.disabled = !(locationSelect.value && photoInput.files.length > 0);
+  }
+
+  // Load data
+  async function init() {
+    const [locRes, rosterRes] = await Promise.all([
+      fetch("/api/locations"),
+      fetch("/api/roster"),
+    ]);
+    locations = await locRes.json();
+    roster = await rosterRes.json();
+
+    locations.forEach(loc => {
+      const opt = document.createElement("option");
+      opt.value = loc;
+      opt.textContent = loc;
+      locationSelect.appendChild(opt);
+    });
+  }
+
+  init();
+
+  // Photo handling
+  photoDrop.addEventListener("click", () => photoInput.click());
+
+  photoDrop.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    photoDrop.classList.add("dragover");
+  });
+
+  photoDrop.addEventListener("dragleave", () => {
+    photoDrop.classList.remove("dragover");
+  });
+
+  photoDrop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    photoDrop.classList.remove("dragover");
+    if (e.dataTransfer.files.length) {
+      photoInput.files = e.dataTransfer.files;
+      handlePhotoSelected();
+    }
+  });
+
+  photoInput.addEventListener("change", handlePhotoSelected);
+
+  function handlePhotoSelected() {
+    const file = photoInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      photoDataUrl = e.target.result;
+      photoPreview.src = photoDataUrl;
+      photoPreview.style.display = "block";
+      photoDrop.style.display = "none";
+    };
+    reader.readAsDataURL(file);
+    updateAnalyzeButton();
+  }
+
+  locationSelect.addEventListener("change", updateAnalyzeButton);
+
+  // Analyze
+  btnAnalyze.addEventListener("click", async () => {
+    const file = photoInput.files[0];
+    if (!file || !locationSelect.value) return;
+
+    loading.classList.add("active");
+
+    const formData = new FormData();
+    formData.append("photo", file);
+
+    try {
+      const res = await fetch("/api/analyze", { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (data.error) {
+        loading.classList.remove("active");
+        alert("Error: " + data.error);
+        return;
+      }
+
+      confirmedNumbers = (data.numbers || []).map(n => String(n));
+      renderChips();
+      loading.classList.remove("active");
+      showStep("confirm");
+    } catch (err) {
+      loading.classList.remove("active");
+      alert("Network error: " + err.message);
+    }
+  });
+
+  // Chip rendering
+  function renderChips() {
+    chipList.innerHTML = "";
+    confirmedNumbers.forEach((num, i) => {
+      const chip = document.createElement("span");
+      chip.className = "chip" + (num.includes("?") ? " uncertain" : "");
+      chip.innerHTML = `<span>${num}</span><button class="remove" data-idx="${i}">&times;</button>`;
+      chipList.appendChild(chip);
+    });
+
+    chipList.querySelectorAll(".remove").forEach(btn => {
+      btn.addEventListener("click", () => {
+        confirmedNumbers.splice(parseInt(btn.dataset.idx), 1);
+        renderChips();
+      });
+    });
+  }
+
+  btnAddNumber.addEventListener("click", addNumber);
+  addNumberInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") addNumber();
+  });
+
+  function addNumber() {
+    const val = addNumberInput.value.trim();
+    if (val && !confirmedNumbers.includes(val)) {
+      confirmedNumbers.push(val);
+      renderChips();
+      addNumberInput.value = "";
+    }
+  }
+
+  // Back button
+  document.getElementById("btn-back-capture").addEventListener("click", () => showStep("capture"));
+
+  // Confirm & run audit
+  btnConfirm.addEventListener("click", () => {
+    const selectedLocation = locationSelect.value;
+    const auditTime = new Date();
+
+    // Clean numbers (remove trailing ?)
+    const cleanNumbers = confirmedNumbers.map(n => n.replace(/\?$/, ""));
+
+    const belongHere = [];
+    const belongElsewhere = [];
+    const offboarded = [];
+    const missing = [];
+
+    // Vehicles assigned to this location
+    const locationVehicles = roster.filter(
+      v => v.assigned_location === selectedLocation && v.status === "active"
+    );
+
+    cleanNumbers.forEach(num => {
+      const vehicle = roster.find(v => v.vehicle_number === num);
+      if (!vehicle) {
+        // Not found in roster at all
+        offboarded.push({ vehicle_number: num, reason: "Not in roster" });
+      } else if (vehicle.status === "offboard") {
+        offboarded.push({ vehicle_number: num, reason: "Offboarded", current_address: vehicle.current_address });
+      } else if (vehicle.assigned_location === selectedLocation) {
+        belongHere.push(vehicle);
+      } else {
+        belongElsewhere.push(vehicle);
+      }
+    });
+
+    // Missing: assigned here but key not found
+    locationVehicles.forEach(v => {
+      if (!cleanNumbers.includes(v.vehicle_number)) {
+        missing.push(v);
+      }
+    });
+
+    const total = cleanNumbers.length;
+    const html = buildResultsHTML({
+      selectedLocation, auditTime, total,
+      belongHere, belongElsewhere, offboarded, missing
+    });
+
+    document.getElementById("results-content").innerHTML = html;
+    showStep("results");
+  });
+
+  function buildResultsHTML({ selectedLocation, auditTime, total, belongHere, belongElsewhere, offboarded, missing }) {
+    const timeStr = auditTime.toLocaleString("en-US", {
+      weekday: "short", year: "numeric", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true
+    });
+
+    let html = "";
+
+    // Thumbnail
+    if (photoDataUrl) {
+      html += `<div class="thumbnail-row"><img src="${photoDataUrl}" alt="Audit photo"></div>`;
+    }
+
+    // Summary
+    html += `<div class="summary-bar">
+      <div class="total">${total} key${total !== 1 ? "s" : ""} scanned at ${selectedLocation}</div>
+      <div class="breakdown">
+        ${belongHere.length} belong here · ${belongElsewhere.length} route elsewhere · ${offboarded.length} offboarded · ${missing.length} missing
+      </div>
+    </div>`;
+
+    html += `<div class="timestamp">Audit performed: ${timeStr}</div>`;
+
+    // Belong here
+    html += `<div class="result-section section-belong">
+      <h3>Keys That Belong Here <span class="count">${belongHere.length}</span></h3>`;
+    if (belongHere.length === 0) {
+      html += `<div class="empty-section">None</div>`;
+    } else {
+      belongHere.sort((a, b) => a.vehicle_number.localeCompare(b.vehicle_number, undefined, { numeric: true }));
+      belongHere.forEach(v => {
+        html += `<div class="result-item">
+          <span class="vehicle-num">#${v.vehicle_number}</span>
+          <div class="detail">${v.current_address || "Address unknown"}</div>
+        </div>`;
+      });
+    }
+    html += `</div>`;
+
+    // Belong elsewhere
+    html += `<div class="result-section section-elsewhere">
+      <h3>Keys That Belong Elsewhere <span class="count">${belongElsewhere.length}</span></h3>`;
+    if (belongElsewhere.length === 0) {
+      html += `<div class="empty-section">None</div>`;
+    } else {
+      belongElsewhere.sort((a, b) => a.vehicle_number.localeCompare(b.vehicle_number, undefined, { numeric: true }));
+      belongElsewhere.forEach(v => {
+        html += `<div class="result-item">
+          <span class="vehicle-num">#${v.vehicle_number}</span>
+          <span class="badge badge-location">${v.assigned_location}</span>
+          <div class="detail">${v.current_address || "Address unknown"}</div>
+        </div>`;
+      });
+    }
+    html += `</div>`;
+
+    // Offboarded
+    html += `<div class="result-section section-offboard">
+      <h3>Offboarded / Unknown <span class="count">${offboarded.length}</span></h3>`;
+    if (offboarded.length === 0) {
+      html += `<div class="empty-section">None</div>`;
+    } else {
+      offboarded.sort((a, b) => a.vehicle_number.localeCompare(b.vehicle_number, undefined, { numeric: true }));
+      offboarded.forEach(v => {
+        html += `<div class="result-item">
+          <span class="vehicle-num">#${v.vehicle_number}</span>
+          <span class="badge badge-offboard">${v.reason}</span>
+          ${v.current_address ? `<div class="detail">${v.current_address}</div>` : ""}
+          <div class="detail" style="color:var(--danger);font-weight:600;">Remove from key box</div>
+        </div>`;
+      });
+    }
+    html += `</div>`;
+
+    // Missing
+    html += `<div class="result-section section-missing">
+      <h3>Missing Keys <span class="count">${missing.length}</span></h3>`;
+    if (missing.length === 0) {
+      html += `<div class="empty-section">None - all keys accounted for!</div>`;
+    } else {
+      missing.sort((a, b) => a.vehicle_number.localeCompare(b.vehicle_number, undefined, { numeric: true }));
+      missing.forEach(v => {
+        html += `<div class="result-item">
+          <span class="vehicle-num">#${v.vehicle_number}</span>
+          <div class="detail">${v.current_address || "Address unknown"}</div>
+        </div>`;
+      });
+    }
+    html += `</div>`;
+
+    return html;
+  }
+
+  // New audit
+  btnNewAudit.addEventListener("click", () => {
+    locationSelect.value = "";
+    photoInput.value = "";
+    photoPreview.style.display = "none";
+    photoDrop.style.display = "";
+    photoDataUrl = null;
+    confirmedNumbers = [];
+    updateAnalyzeButton();
+    showStep("capture");
+  });
+
+  // Export / copy summary
+  btnExport.addEventListener("click", () => {
+    const selectedLocation = locationSelect.value;
+    const sections = document.querySelectorAll(".result-section");
+    let text = `TNS Spare Key Audit - ${selectedLocation}\n`;
+    text += `${document.querySelector(".timestamp").textContent}\n`;
+    text += `${document.querySelector(".summary-bar .total").textContent}\n`;
+    text += `${document.querySelector(".summary-bar .breakdown").textContent}\n\n`;
+
+    sections.forEach(section => {
+      const title = section.querySelector("h3").textContent.replace(/\d+$/, "").trim();
+      text += `--- ${title} ---\n`;
+      const items = section.querySelectorAll(".result-item");
+      if (items.length === 0) {
+        text += "  None\n";
+      } else {
+        items.forEach(item => {
+          const num = item.querySelector(".vehicle-num").textContent;
+          const badge = item.querySelector(".badge");
+          const details = item.querySelectorAll(".detail");
+          let line = `  ${num}`;
+          if (badge) line += ` [${badge.textContent}]`;
+          details.forEach(d => { line += ` - ${d.textContent}`; });
+          text += line + "\n";
+        });
+      }
+      text += "\n";
+    });
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => {
+        btnExport.textContent = "Copied!";
+        setTimeout(() => { btnExport.textContent = "Copy Summary"; }, 2000);
+      });
+    } else {
+      // Fallback
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      btnExport.textContent = "Copied!";
+      setTimeout(() => { btnExport.textContent = "Copy Summary"; }, 2000);
+    }
+  });
+})();
+</script>
+</body>
+</html>

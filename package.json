@@ -1,0 +1,22 @@
+{
+  "name": "tns-spare-fleet-key-audit",
+  "version": "1.0.0",
+  "description": "app to ingest a picture of all keys in a spare key box and process results of what keys belong in that hub, missing from the hub, and where keys should be moved to",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:37585/git/leightns/tns-spare-fleet-key-audit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "express": "^5.2.1",
+    "multer": "^2.1.1"
+  }
+}

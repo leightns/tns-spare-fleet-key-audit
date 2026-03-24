@@ -1,0 +1,100 @@
+vehicle_number,assigned_location,current_address,status
+158,CT - Enfield,"155 Hazard Ave, Enfield, CT 06082, USA",active
+160,,"27 Juniper Rd, Middlebury, CT 06762, USA",offboard
+162,CT - Fairfield,"501 Kings Hwy, Fairfield, CT 06825, USA",active
+168,CT - Fairfield,"77-79 Golden Hill St, Milford, CT 06460, USA",active
+169,CT - Old Saybrook,"31 Boston Post Rd, Waterford, CT 06385, USA",active
+171,CT - Monroe,"487 Federal Rd, Brookfield, CT 06804, USA",active
+172,CT - Wallingford,"17 Gabriel St, East Haven, CT 06513, USA",active
+173,CT - Fairfield,"65 Nathan Hale St, Fairfield, CT 06825, USA",active
+175,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+179,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+181,CT - Old Saybrook,"5 Research Pkwy, Old Saybrook, CT 06475, USA",active
+187,CT - Fairfield,"501 Kings Hwy, Fairfield, CT 06825, USA",active
+190,CT - Torrington,"511 Winsted Rd, Torrington, CT 06790, USA",active
+192,,"27 Juniper Rd, Middlebury, CT 06762, USA",offboard
+198,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+199,CT - Fairfield,"430 Main Ave, Norwalk, CT 06851, USA",active
+200,CT - Old Saybrook,"5 Research Pkwy, Old Saybrook, CT 06475, USA",active
+201,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+203,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+207,CT - Middlebury,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+209,CT - Fairfield,"501-501 Kings Hwy, Fairfield, CT 06825, USA",active
+210,CT - Middlebury,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+211,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+212,CT - Glastonbury,"148 Oak St, Glastonbury, CT 06033, USA",active
+213,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+214,CT - Fairfield,"501 Boston Post Rd #16, Orange, CT 06477, USA",active
+216,CT - Monroe,"1455 Southford Rd, Southbury, CT 06488, USA",active
+217,CT - Enfield,"151 Hazard Ave, Enfield, CT 06082, USA",active
+222,CT - Torrington,"511 Winsted Rd, Torrington, CT 06790, USA",active
+223,CT - Wallingford,"1000 Yale Ave, Wallingford, CT 06492, USA",active
+224,MA - West - Home Vehicles,"251 N Washington St, Belchertown, MA 01007, USA",active
+225,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+226,CT - Old Saybrook,"5 Research Pkwy, Old Saybrook, CT 06475, USA",active
+230,CT - Middlebury,"426 Tranquillity Rd, Middlebury, CT 06762, USA",active
+231,CT - Middlebury,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+234,MA - West Springfield,"123 Hawley St, Northampton, MA 01060, USA",active
+235,CT - Monroe,"215 Coram Ave, Shelton, CT 06484, USA",active
+236,CT - Monroe,"18-30 Shelter Rock Rd, Danbury, CT 06810, USA",active
+237,MA - Northampton,"73 Main St, Greenfield, MA 01301, USA",active
+239,MA - Northampton,"123 Hawley St, Northampton, MA 01060, USA",active
+240,CT - Monroe,"18-30 Shelter Rock Rd, Danbury, CT 06810, USA",active
+241,MA - Worcester,"105 Stafford St, Worcester, MA 01603, USA",active
+242,MA - Worcester,"105 Stafford St, Worcester, MA 01603, USA",active
+243,MA - Northampton,"68 Baldwin St, West Springfield, MA 01089, USA",active
+244,CT - Monroe,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+245,CT - Torrington,"511 Winsted Rd, Torrington, CT 06790, USA",active
+246,CT - Old Saybrook,"5 Research Pkwy, Old Saybrook, CT 06475, USA",active
+247,CT - Willimantic,"53 Clearview Dr, Brooklyn, CT 06234, USA",active
+248,CT - Middlebury,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+249,CT - Fairfield,"1177 High Ridge Rd, Stamford, CT 06905, USA",active
+250,CT - Middlebury,"28 Scovill St, Waterbury, CT 06706, USA",active
+251,CT - Willimantic,"3480 Main St, Coventry, CT 06238, USA",active
+252,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+253,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+254,CT - Farmington,"420 Emmett St #01, Bristol, CT 06010, USA",active
+255,CT - Glastonbury,"60 Hatfield Dr, Bolton, CT 06043, USA",active
+256,CT - Fairfield,"501-501 Kings Hwy, Fairfield, CT 06825, USA",active
+257,CT - Monroe,"85 Mountain Rd, Seymour, CT 06483, USA",active
+258,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+259,CT - Farmington,"36 Albany Turnpike, West Simsbury, CT 06092, USA",active
+260,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+261,CT - Glastonbury,"151 Hazard Ave, Enfield, CT 06082, USA",active
+262,MA - Worcester,"105 Stafford St, Worcester, MA 01603, USA",active
+263,MA - West Springfield,"68 Baldwin St, West Springfield, MA 01089, USA",active
+264,MA - Northampton,"123 Hawley St, Northampton, MA 01060, USA",active
+266,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+267,CT - Glastonbury,"148 Oak St, Glastonbury, CT 06033, USA",active
+268,CT - Fairfield,"501-501 Kings Hwy, Fairfield, CT 06825, USA",active
+269,CT - Middlebury,"620 3 Mile Hill Rd, Middlebury, CT 06762, USA",active
+270,CT - Farmington,"1 Fenwick Dr, Farmington, CT 06032, USA",active
+271,CT - Glastonbury,"27 Commerce St, Glastonbury, CT 06033, USA",active
+272,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+273,CT - Middlebury,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+274,CT - Fairfield,"Boston Post Rd & Op Bob's Furniture, Orange, CT 06477, USA",active
+275,MA - Worcester,"99 Stafford St, Worcester, MA 01603, USA",active
+276,MA - Worcester,"105 Stafford St, Worcester, MA 01603, USA",active
+277,MA - West Springfield,"68 Baldwin St, West Springfield, MA 01089, USA",active
+278,MA - Natick,"209 W Central St, Natick, MA 01760, USA",active
+279,MA - West - Home Vehicles,"118 River Rd, Leeds, MA 01053, USA",active
+280,CT - Farmington,"395 W Avon Rd, Avon, CT 06001, USA",active
+281,CT - Glastonbury,"27 Ruth Rd, New Britain, CT 06053, USA",active
+282,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+283,CT - Middlebury,"320 Sylvan Lake Rd, Oakville, CT 06779, USA",active
+284,CT - Wallingford,"950 Yale Ave, Wallingford, CT 06492, USA",active
+285,CT - Middlebury,"126 Cedar Ave, Waterbury, CT 06705, USA",active
+286,CT - Fairfield,"500 Boston Post Rd, Orange, CT 06477, USA",active
+287,CT - Monroe,"435 Main St, Monroe, CT 06468, USA",active
+289,CT - Middlebury,"84 Willcox St, Bristol, CT 06010, USA",active
+290,CT - Wallingford,"74 Goodwin Park Rd, Wethersfield, CT 06109, USA",active
+291,CT - Wallingford,"968 Yale Ave, Wallingford, CT 06492, USA",active
+292,CT - Old Saybrook,"I-395, Quaker Hill, CT 06375, USA",active
+293,CT - Fairfield,"65 Nathan Hale St, Fairfield, CT 06825, USA",active
+294,CT - Middlebury,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+295,CT - Middlebury,"37 Bessie St, Oakville, CT 06779, USA",active
+296,CT - Torrington,"427 Winsted Rd, Torrington, CT 06790, USA",active
+297,CT - Middlebury,"27 Juniper Rd, Middlebury, CT 06762, USA",active
+298,CT - Fairfield,"1201 High Ridge Rd, Stamford, CT 06905, USA",active
+299,CT - Monroe,"21 Mill St, New Milford, CT 06776, USA",active
+Maintenance Van,,"27 Juniper Rd, Middlebury, CT 06762, USA",offboard
