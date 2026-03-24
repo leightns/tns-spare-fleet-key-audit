@@ -217,8 +217,16 @@ app.get("/api/audit-log", (_req, res) => {
   res.json(loadAuditLog());
 });
 
-// Serve static files
-app.use(express.static(path.join(__dirname, "public")));
+// Serve static files with no-cache headers to prevent stale versions
+app.use(express.static(path.join(__dirname, "public"), {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res) => {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+  },
+}));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
