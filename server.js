@@ -93,24 +93,42 @@ app.post("/api/analyze", upload.single("photo"), async (req, res) => {
   const mediaType = req.file.mimetype || "image/jpeg";
 
   try {
-    const ocrPrompt = `You are analyzing a photo of vehicle spare keys laid out on a table for a fleet management audit.
+    const ocrPrompt = `You are analyzing a photo of vehicle spare keys hanging on hooks or laid out for a fleet management audit.
 
-TASK: Identify every vehicle number printed on key tags/fobs that have The Next Street branding (the logo features an "X" mark).
+TASK: Identify every vehicle number visible on key tags/fobs in this image.
 
-STEP 1: First, carefully scan the entire image and count the total number of Next Street branded key tags you can see. State this count.
-STEP 2: Now systematically go through each key tag, working left-to-right, top-to-bottom. For each tag, read the vehicle number.
+Key tags for "The Next Street" driving school typically have:
+- A colored plastic key tag (often blue, red, green, yellow, or white)
+- A vehicle number printed/written on the tag (2-4 digits like 44, 201, 252, 1023)
+- Sometimes the company name or an "X" logo
 
-RULES:
-- Read ONLY numbers on Next Street branded key tags. Ignore house keys, personal keys, or non-branded tags.
-- Vehicle numbers are typically 2-4 digit numbers (e.g. 44, 201, 252, 1023).
-- Some tags may be partially obscured, upside down, or at an angle - do your best to read them.
-- If a number is partially legible, include your best guess with a "?" suffix (e.g. "44?").
-- Common OCR confusions: 1 vs 7, 3 vs 8, 5 vs 6, 0 vs O. Use context (these are vehicle numbers) to resolve ambiguity.
-- IMPORTANT: Your array length MUST match the count of key tags from Step 1. If it doesn't, re-examine the image for missed keys.
+INSTRUCTIONS - Think step by step:
+1. First, scan the ENTIRE image systematically. Divide it into quadrants (top-left, top-right, bottom-left, bottom-right) and examine each.
+2. Count every key tag you can see - there may be 10, 20, 30+ keys in the image.
+3. For EACH key tag, read the number. Describe its position and color to stay organized.
+4. Some tags may be:
+   - Upside down or sideways - mentally rotate to read them
+   - Partially hidden behind other keys - read what you can see
+   - At steep angles - adjust perspective
+   - Small or blurry - give your best read with "?" suffix
+5. Double-check: go back through the image one more time to catch any you missed.
 
-Return a JSON object with this exact format:
-{"count": <number of Next Street key tags seen>, "numbers": ["201", "252", "283"]}
-Return ONLY this JSON object, no other text.`;
+IMPORTANT: These photos typically contain MANY keys (often 15-40+). If you only found a few, look again more carefully - you are likely missing keys.
+
+After your analysis, output your final answer as a JSON object on its own line in this exact format:
+RESULT: {"count": <total key tags seen>, "numbers": ["201", "252", "283"]}`;
+
+    const pass2Extra = `\n\nFocus especially on:
+- Keys in the CORNERS and EDGES of the image that are easy to overlook
+- Keys that are overlapping or clustered together
+- Any keys hanging at the back that are partially obscured
+- Keys with faded or small numbers`;
+
+    const pass3Extra = `\n\nThis is your FINAL careful pass. Be extremely thorough:
+- Look for keys at ALL orientations (0°, 90°, 180°, 270°)
+- Check for keys in shadows or darker areas of the image
+- Look for any keys you might dismiss as non-branded - include ALL numbered tags
+- Count every single tag visible, even partially`;
 
     // Run 3 parallel passes for consistency
     const imageContent = {
@@ -121,26 +139,28 @@ Return ONLY this JSON object, no other text.`;
     const passes = await Promise.all([
       client.messages.create({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
+        max_tokens: 4096,
         messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt }] }],
       }),
       client.messages.create({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + "\n\nLook especially carefully at keys that may be overlapping, at angles, or partially hidden behind other keys." }] }],
+        max_tokens: 4096,
+        messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + pass2Extra }] }],
       }),
       client.messages.create({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + "\n\nTry rotating your perspective mentally - some tags may be upside down or sideways. Be thorough." }] }],
+        max_tokens: 4096,
+        messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + pass3Extra }] }],
       }),
     ]);
 
     // Parse each pass
     const passResults = passes.map((response, i) => {
       const text = response.content[0].text.trim();
-      // Try to parse as JSON object with count
-      const objMatch = text.match(/\{[\s\S]*\}/);
+      console.log(`Pass ${i + 1} response length: ${text.length} chars`);
+      // Look for RESULT: line first, then fall back to last JSON object
+      const resultMatch = text.match(/RESULT:\s*(\{[\s\S]*?\})\s*$/m);
+      const objMatch = resultMatch ? resultMatch[1].match(/\{[\s\S]*\}/) : text.match(/\{[^{}]*"numbers"[^{}]*\}/s) || text.match(/\{[\s\S]*\}/);
       if (objMatch) {
         try {
           const parsed = JSON.parse(objMatch[0]);
