@@ -4,6 +4,7 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const Anthropic = require("@anthropic-ai/sdk").default;
+const XLSX = require("xlsx");
 
 const app = express();
 app.use(express.json());
@@ -52,22 +53,82 @@ function loadRoster() {
   });
 }
 
-const roster = loadRoster();
+let roster = loadRoster();
+let locations = buildLocations(roster);
 console.log(`Loaded ${roster.length} vehicles from roster`);
 
-// Get unique active locations sorted: CT first, then MA
-const locations = [
-  ...new Set(
-    roster
-      .filter((v) => v.status === "active" && v.assigned_location)
-      .map((v) => v.assigned_location)
-  ),
-].sort((a, b) => {
-  const aState = a.startsWith("CT") ? 0 : 1;
-  const bState = b.startsWith("CT") ? 0 : 1;
-  if (aState !== bState) return aState - bState;
-  return a.localeCompare(b);
-});
+function buildLocations(rosterData) {
+  return [
+    ...new Set(
+      rosterData
+        .filter((v) => v.status === "active" && v.assigned_location)
+        .map((v) => v.assigned_location)
+    ),
+  ].sort((a, b) => {
+    const aState = a.startsWith("CT") ? 0 : 1;
+    const bState = b.startsWith("CT") ? 0 : 1;
+    if (aState !== bState) return aState - bState;
+    return a.localeCompare(b);
+  });
+}
+
+// Convert GPS xlsx to roster CSV
+function convertXlsxToRoster(buffer) {
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const allRows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+  // Find the header row (contains "Device", "Group(s)", etc.)
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(allRows.length, 10); i++) {
+    const row = allRows[i];
+    if (row && row[0] === "Device" && row[1] && row[1].includes("Group")) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx === -1) throw new Error("Could not find header row with 'Device' and 'Group' columns");
+
+  const vehicles = [];
+  for (let i = headerIdx + 1; i < allRows.length; i++) {
+    const row = allRows[i];
+    if (!row || row[0] == null) continue;
+
+    const device = String(row[0]);
+    const groupStr = row[1] ? String(row[1]) : "";
+    const address = row[5] ? String(row[5]) : "";
+
+    let status, assignedLocation;
+    if (groupStr === "Offboard" || groupStr === "N/A" || !groupStr) {
+      status = "offboard";
+      assignedLocation = "";
+    } else {
+      status = "active";
+      const parts = groupStr.split(",").map((p) => p.trim());
+      const locationParts = parts.filter((p) => p !== "PEP");
+      assignedLocation = locationParts[0] || groupStr;
+    }
+
+    vehicles.push({
+      vehicle_number: device,
+      assigned_location: assignedLocation,
+      current_address: address,
+      status,
+    });
+  }
+
+  return vehicles;
+}
+
+function saveRosterCsv(vehicles) {
+  const csvPath = path.join(__dirname, "vehicle_roster.csv");
+  const header = "vehicle_number,assigned_location,current_address,status";
+  const lines = vehicles.map((v) => {
+    const addr = v.current_address.includes(",") ? `"${v.current_address}"` : v.current_address;
+    return `${v.vehicle_number},${v.assigned_location},${addr},${v.status}`;
+  });
+  fs.writeFileSync(csvPath, [header, ...lines].join("\n"));
+}
 
 // API routes
 app.get("/api/locations", (_req, res) => {
@@ -218,6 +279,43 @@ RESULT: {"count": <total key tags seen>, "numbers": ["201", "252", "283"]}`;
     console.error("Anthropic API error:", err.message);
     res.status(500).json({ error: "Failed to analyze image: " + err.message });
   }
+});
+
+// Roster upload API
+app.post("/api/upload-roster", upload.single("roster"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+  try {
+    const vehicles = convertXlsxToRoster(req.file.buffer);
+    saveRosterCsv(vehicles);
+    roster = vehicles;
+    locations = buildLocations(roster);
+    const active = vehicles.filter((v) => v.status === "active").length;
+    const offboard = vehicles.filter((v) => v.status === "offboard").length;
+    console.log(`Roster updated: ${vehicles.length} vehicles (${active} active, ${offboard} offboard)`);
+    res.json({
+      ok: true,
+      total: vehicles.length,
+      active,
+      offboard,
+      locations: locations.length,
+    });
+  } catch (err) {
+    console.error("Roster upload error:", err.message);
+    res.status(400).json({ error: "Failed to process file: " + err.message });
+  }
+});
+
+app.get("/api/roster-info", (_req, res) => {
+  const csvPath = path.join(__dirname, "vehicle_roster.csv");
+  const stat = fs.statSync(csvPath);
+  res.json({
+    lastUpdated: stat.mtime.toISOString(),
+    total: roster.length,
+    active: roster.filter((v) => v.status === "active").length,
+    locations: locations.length,
+  });
 });
 
 // Audit log API
