@@ -356,9 +356,10 @@ async function fetchOneStepDevices() {
     console.log("Sample device keys:", Object.keys(sample).join(", "));
     console.log("Sample device_id:", sample.device_id);
     console.log("Sample display_name:", sample.display_name);
-    // Log all group-related fields
+    console.log("Sample active_state:", sample.active_state);
+    // Log all group-related and status-related fields
     for (const key of Object.keys(sample)) {
-      if (key.toLowerCase().includes("group")) {
+      if (key.toLowerCase().includes("group") || key.toLowerCase().includes("state") || key.toLowerCase().includes("status")) {
         console.log(`Sample ${key}:`, JSON.stringify(sample[key]));
       }
     }
@@ -527,8 +528,12 @@ app.post("/api/refresh-roster", async (_req, res) => {
     let vehicles = convertOneStepToRoster(devices, groupMap);
     console.log(`Converted to ${vehicles.length} vehicles. Reverse geocoding addresses...`);
 
-    // Reverse geocode addresses
-    vehicles = await batchReverseGeocode(vehicles);
+    // Only reverse geocode active vehicles (saves ~200 API calls / ~4 min)
+    const active = vehicles.filter((v) => v.status === "active");
+    const inactive = vehicles.filter((v) => v.status !== "active");
+    console.log(`Geocoding ${active.length} active vehicles (skipping ${inactive.length} offboard)...`);
+    const geocoded = await batchReverseGeocode(active);
+    vehicles = [...geocoded, ...inactive];
 
     // Remove lat/lng helper fields before saving
     const rosterVehicles = vehicles.map(({ lat, lng, ...rest }) => rest);
