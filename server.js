@@ -325,29 +325,78 @@ async function fetchOneStepDevices() {
   const apiKey = process.env.ONESTEP_API_KEY;
   if (!apiKey) throw new Error("ONESTEP_API_KEY not configured");
 
-  // Fetch devices and groups in parallel
-  const [devicesRes, groupsRes] = await Promise.all([
-    fetch(`${ONESTEP_BASE}/device?latest_point=true&api-key=${apiKey}`),
-    fetch(`${ONESTEP_BASE}/group?api-key=${apiKey}`),
-  ]);
-
+  // Fetch devices first
+  const devicesRes = await fetch(`${ONESTEP_BASE}/device?latest_point=true&api-key=${apiKey}`);
   if (!devicesRes.ok) throw new Error(`OneStep devices API returned ${devicesRes.status}`);
-  if (!groupsRes.ok) throw new Error(`OneStep groups API returned ${groupsRes.status}`);
-
   const devicesData = await devicesRes.json();
-  const groupsData = await groupsRes.json();
 
-  // Build group ID -> name map
-  const groupMap = {};
-  const groupList = groupsData.result_list || groupsData || [];
-  (Array.isArray(groupList) ? groupList : []).forEach((g) => {
-    const id = g.group_id || g.id;
-    const name = g.group_name || g.name || g.display_name || "";
-    if (id) groupMap[id] = name;
-  });
-
+  // Log first device structure to help debug group mapping
   const devices = devicesData.result_list || devicesData || [];
-  return { devices: Array.isArray(devices) ? devices : [], groupMap };
+  const deviceList = Array.isArray(devices) ? devices : [];
+  if (deviceList.length > 0) {
+    const sample = deviceList[0];
+    console.log("Sample device keys:", Object.keys(sample).join(", "));
+    console.log("Sample device_id:", sample.device_id);
+    console.log("Sample display_name:", sample.display_name);
+    // Log all group-related fields
+    for (const key of Object.keys(sample)) {
+      if (key.toLowerCase().includes("group")) {
+        console.log(`Sample ${key}:`, JSON.stringify(sample[key]));
+      }
+    }
+  }
+
+  // Try multiple group endpoint variants
+  let groupMap = {};
+  const groupEndpoints = ["group", "groups", "device-group", "device-groups"];
+  for (const ep of groupEndpoints) {
+    try {
+      const groupsRes = await fetch(`${ONESTEP_BASE}/${ep}?api-key=${apiKey}`);
+      if (groupsRes.ok) {
+        const groupsData = await groupsRes.json();
+        console.log(`Groups endpoint /${ep} succeeded:`, JSON.stringify(groupsData).slice(0, 500));
+        const groupList = groupsData.result_list || groupsData || [];
+        (Array.isArray(groupList) ? groupList : []).forEach((g) => {
+          const id = g.group_id || g.id;
+          const name = g.group_name || g.name || g.display_name || "";
+          if (id) groupMap[id] = name;
+        });
+        if (Object.keys(groupMap).length > 0) {
+          console.log(`Loaded ${Object.keys(groupMap).length} groups from /${ep}`);
+          break;
+        }
+      } else {
+        console.log(`Groups endpoint /${ep} returned ${groupsRes.status}`);
+      }
+    } catch (err) {
+      console.log(`Groups endpoint /${ep} failed: ${err.message}`);
+    }
+  }
+
+  // If no group endpoint worked, try to extract group info from devices themselves
+  if (Object.keys(groupMap).length === 0) {
+    console.log("No group endpoint worked. Extracting group info from device data...");
+    deviceList.forEach((d) => {
+      // Check for inline group data
+      const groups = d.groups || d.group_list || d.device_groups || [];
+      if (Array.isArray(groups)) {
+        groups.forEach((g) => {
+          if (typeof g === "object") {
+            const id = g.group_id || g.id;
+            const name = g.group_name || g.name || g.display_name || "";
+            if (id && name) groupMap[id] = name;
+          }
+        });
+      }
+    });
+    if (Object.keys(groupMap).length > 0) {
+      console.log(`Extracted ${Object.keys(groupMap).length} groups from device data`);
+    } else {
+      console.log("WARNING: Could not resolve any group names. Using display_name for group assignment.");
+    }
+  }
+
+  return { devices: deviceList, groupMap };
 }
 
 // Reverse geocode lat/lng to address using OpenStreetMap Nominatim
@@ -384,19 +433,45 @@ async function batchReverseGeocode(items) {
 }
 
 function convertOneStepToRoster(devices, groupMap) {
+  const hasGroupMap = Object.keys(groupMap).length > 0;
+
   return devices.map((d) => {
     const displayName = d.display_name || d.device_id || "";
     const point = d.latest_device_point || d.latest_accurate_device_point || {};
     const lat = point.lat || 0;
     const lng = point.lng || 0;
 
-    // Resolve group names
-    const groupIds = d.group_id_list || d.group_ids || d.groups || [];
-    const groupNames = (Array.isArray(groupIds) ? groupIds : [groupIds])
-      .map((id) => groupMap[id] || "")
-      .filter(Boolean);
+    // Try multiple ways to resolve group names
+    let groupNames = [];
 
-    // Determine location and status (same logic as xlsx conversion)
+    if (hasGroupMap) {
+      // Use group map to resolve IDs to names
+      const groupIds = d.group_id_list || d.group_ids || [];
+      groupNames = (Array.isArray(groupIds) ? groupIds : [groupIds])
+        .map((id) => groupMap[id] || "")
+        .filter(Boolean);
+    }
+
+    // If no group names from IDs, try inline group objects
+    if (groupNames.length === 0) {
+      const inlineGroups = d.groups || d.group_list || d.device_groups || [];
+      if (Array.isArray(inlineGroups)) {
+        inlineGroups.forEach((g) => {
+          if (typeof g === "string") groupNames.push(g);
+          else if (typeof g === "object") {
+            const name = g.group_name || g.name || g.display_name || "";
+            if (name) groupNames.push(name);
+          }
+        });
+      }
+    }
+
+    // Log for debugging first few devices
+    if (devices.indexOf(d) < 3) {
+      console.log(`Device "${displayName}": groupNames=[${groupNames.join(", ")}], active_state=${d.active_state}`);
+    }
+
+    // Determine location and status
     let status = "active";
     let assignedLocation = "";
 
@@ -416,7 +491,7 @@ function convertOneStepToRoster(devices, groupMap) {
     return {
       vehicle_number: displayName,
       assigned_location: assignedLocation,
-      current_address: "", // Will be filled by reverse geocoding
+      current_address: "",
       status,
       lat,
       lng,
