@@ -325,14 +325,32 @@ async function fetchOneStepDevices() {
   const apiKey = process.env.ONESTEP_API_KEY;
   if (!apiKey) throw new Error("ONESTEP_API_KEY not configured");
 
-  // Fetch devices first
-  const devicesRes = await fetch(`${ONESTEP_BASE}/device?latest_point=true&api-key=${apiKey}`);
-  if (!devicesRes.ok) throw new Error(`OneStep devices API returned ${devicesRes.status}`);
-  const devicesData = await devicesRes.json();
+  // Fetch all devices with pagination (API defaults to 100 per page; we use 200 to be safe)
+  const PAGE_SIZE = 200;
+  let allDevices = [];
+  let offset = 0;
+
+  while (true) {
+    const devicesRes = await fetch(
+      `${ONESTEP_BASE}/device?latest_point=true&limit=${PAGE_SIZE}&offset=${offset}&api-key=${apiKey}`
+    );
+    if (!devicesRes.ok) throw new Error(`OneStep devices API returned ${devicesRes.status}`);
+    const devicesData = await devicesRes.json();
+
+    const page = devicesData.result_list || devicesData || [];
+    const pageList = Array.isArray(page) ? page : [];
+    allDevices = allDevices.concat(pageList);
+    console.log(`Fetched offset=${offset}: ${pageList.length} devices (running total: ${allDevices.length})`);
+
+    // Done when this page is shorter than requested
+    if (pageList.length < PAGE_SIZE) break;
+
+    offset += PAGE_SIZE;
+    if (offset > 10000) { console.warn("Pagination safety limit reached"); break; }
+  }
 
   // Log first device structure to help debug group mapping
-  const devices = devicesData.result_list || devicesData || [];
-  const deviceList = Array.isArray(devices) ? devices : [];
+  const deviceList = allDevices;
   if (deviceList.length > 0) {
     const sample = deviceList[0];
     console.log("Sample device keys:", Object.keys(sample).join(", "));
