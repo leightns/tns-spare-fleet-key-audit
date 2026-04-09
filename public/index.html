@@ -526,7 +526,7 @@
   <div class="header" style="position:relative;">
     <h1>THE NEXT STREET</h1>
     <div class="subtitle">Spare Key Audit</div>
-    <div style="font-size:11px;opacity:0.5;margin-top:4px;">v1.3.0</div>
+    <div style="font-size:11px;opacity:0.5;margin-top:4px;">v1.4.0</div>
     <button class="history-btn" id="btn-history">History</button>
   </div>
 
@@ -609,6 +609,12 @@
         <h2>Audit History</h2>
         <div id="history-list"></div>
         <div id="history-empty" style="color:var(--text-light);font-size:14px;text-align:center;padding:20px;">No audits logged yet.</div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <h2>Vehicle Roster</h2>
+        <div id="roster-info" style="font-size:13px;color:var(--text-light);margin-bottom:12px;">Loading...</div>
+        <button id="btn-refresh-roster" class="btn btn-primary">Refresh from OneStep GPS</button>
+        <div id="roster-status" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:14px;"></div>
       </div>
       <button id="btn-back-home" class="btn btn-outline" style="margin-top:8px;">Back</button>
     </div>
@@ -1122,6 +1128,7 @@
   // History
   btnHistory.addEventListener("click", async () => {
     showStep("history");
+    loadRosterInfo();
     const historyList = document.getElementById("history-list");
     const historyEmpty = document.getElementById("history-empty");
     historyList.innerHTML = "";
@@ -1186,6 +1193,66 @@
   }
 
   document.getElementById("btn-back-home").addEventListener("click", () => showStep("capture"));
+
+  // Roster refresh
+  async function loadRosterInfo() {
+    try {
+      const res = await fetch("/api/roster-info");
+      const info = await res.json();
+      const d = new Date(info.lastUpdated);
+      const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const timeStr = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      document.getElementById("roster-info").innerHTML =
+        `${info.total} vehicles (${info.active} active) across ${info.locations} locations<br>Last updated: ${dateStr} at ${timeStr}`;
+    } catch {
+      document.getElementById("roster-info").textContent = "Could not load roster info.";
+    }
+  }
+
+  document.getElementById("btn-refresh-roster").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-refresh-roster");
+    const status = document.getElementById("roster-status");
+    btn.disabled = true;
+    btn.textContent = "Refreshing...";
+    status.style.display = "block";
+    status.style.background = "#f0f4ff";
+    status.style.color = "var(--primary)";
+    status.textContent = "Pulling data from OneStep GPS and geocoding addresses. This may take a couple minutes...";
+
+    try {
+      const res = await fetch("/api/refresh-roster", { method: "POST" });
+      const data = await res.json();
+      if (data.error) {
+        status.style.background = "#fee2e2";
+        status.style.color = "var(--danger)";
+        status.textContent = "Error: " + data.error;
+      } else {
+        status.style.background = "#d1fae5";
+        status.style.color = "var(--success)";
+        status.textContent = `Roster updated: ${data.total} vehicles (${data.active} active, ${data.offboard} offboard) across ${data.locations} locations.`;
+        // Reload roster data in the app
+        const rosterRes = await fetch("/api/roster");
+        roster = await rosterRes.json();
+        const locRes = await fetch("/api/locations");
+        locations = await locRes.json();
+        // Refresh location dropdown
+        locationSelect.innerHTML = '<option value="">Choose a location...</option>';
+        locations.forEach(loc => {
+          const opt = document.createElement("option");
+          opt.value = loc;
+          opt.textContent = loc;
+          locationSelect.appendChild(opt);
+        });
+        loadRosterInfo();
+      }
+    } catch (err) {
+      status.style.background = "#fee2e2";
+      status.style.color = "var(--danger)";
+      status.textContent = "Network error: " + err.message;
+    }
+    btn.disabled = false;
+    btn.textContent = "Refresh from OneStep GPS";
+  });
 })();
 </script>
 </body>

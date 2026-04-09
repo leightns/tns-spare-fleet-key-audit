@@ -318,6 +318,149 @@ app.get("/api/roster-info", (_req, res) => {
   });
 });
 
+// OneStep GPS API integration
+const ONESTEP_BASE = "https://track.onestepgps.com/v3/api/public";
+
+async function fetchOneStepDevices() {
+  const apiKey = process.env.ONESTEP_API_KEY;
+  if (!apiKey) throw new Error("ONESTEP_API_KEY not configured");
+
+  // Fetch devices and groups in parallel
+  const [devicesRes, groupsRes] = await Promise.all([
+    fetch(`${ONESTEP_BASE}/device?latest_point=true&api-key=${apiKey}`),
+    fetch(`${ONESTEP_BASE}/group?api-key=${apiKey}`),
+  ]);
+
+  if (!devicesRes.ok) throw new Error(`OneStep devices API returned ${devicesRes.status}`);
+  if (!groupsRes.ok) throw new Error(`OneStep groups API returned ${groupsRes.status}`);
+
+  const devicesData = await devicesRes.json();
+  const groupsData = await groupsRes.json();
+
+  // Build group ID -> name map
+  const groupMap = {};
+  const groupList = groupsData.result_list || groupsData || [];
+  (Array.isArray(groupList) ? groupList : []).forEach((g) => {
+    const id = g.group_id || g.id;
+    const name = g.group_name || g.name || g.display_name || "";
+    if (id) groupMap[id] = name;
+  });
+
+  const devices = devicesData.result_list || devicesData || [];
+  return { devices: Array.isArray(devices) ? devices : [], groupMap };
+}
+
+// Reverse geocode lat/lng to address using OpenStreetMap Nominatim
+async function reverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      { headers: { "User-Agent": "TNS-Key-Audit-App/1.0" } }
+    );
+    if (!res.ok) return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    const data = await res.json();
+    return data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  } catch {
+    return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  }
+}
+
+// Batch reverse geocode with rate limiting (1 req/sec for Nominatim)
+async function batchReverseGeocode(items) {
+  const results = [];
+  for (const item of items) {
+    if (item.lat && item.lng) {
+      const address = await reverseGeocode(item.lat, item.lng);
+      results.push({ ...item, address });
+      // Rate limit: 1 request per second for Nominatim
+      if (items.indexOf(item) < items.length - 1) {
+        await new Promise((r) => setTimeout(r, 1100));
+      }
+    } else {
+      results.push({ ...item, address: "" });
+    }
+  }
+  return results;
+}
+
+function convertOneStepToRoster(devices, groupMap) {
+  return devices.map((d) => {
+    const displayName = d.display_name || d.device_id || "";
+    const point = d.latest_device_point || d.latest_accurate_device_point || {};
+    const lat = point.lat || 0;
+    const lng = point.lng || 0;
+
+    // Resolve group names
+    const groupIds = d.group_id_list || d.group_ids || d.groups || [];
+    const groupNames = (Array.isArray(groupIds) ? groupIds : [groupIds])
+      .map((id) => groupMap[id] || "")
+      .filter(Boolean);
+
+    // Determine location and status (same logic as xlsx conversion)
+    let status = "active";
+    let assignedLocation = "";
+
+    if (groupNames.length === 0 || groupNames.includes("Offboard") || groupNames.includes("N/A")) {
+      status = "offboard";
+      assignedLocation = "";
+    } else {
+      const locationParts = groupNames.filter((n) => n !== "PEP");
+      assignedLocation = locationParts[0] || groupNames[0] || "";
+    }
+
+    // Also check active_state from the device
+    if (d.active_state === "deactivated" || d.active_state === "inactive") {
+      status = "offboard";
+    }
+
+    return {
+      vehicle_number: displayName,
+      assigned_location: assignedLocation,
+      current_address: "", // Will be filled by reverse geocoding
+      status,
+      lat,
+      lng,
+    };
+  });
+}
+
+// Refresh roster from OneStep GPS API
+app.post("/api/refresh-roster", async (_req, res) => {
+  try {
+    console.log("Refreshing roster from OneStep GPS...");
+    const { devices, groupMap } = await fetchOneStepDevices();
+    console.log(`Fetched ${devices.length} devices and ${Object.keys(groupMap).length} groups`);
+
+    let vehicles = convertOneStepToRoster(devices, groupMap);
+    console.log(`Converted to ${vehicles.length} vehicles. Reverse geocoding addresses...`);
+
+    // Reverse geocode addresses
+    vehicles = await batchReverseGeocode(vehicles);
+
+    // Remove lat/lng helper fields before saving
+    const rosterVehicles = vehicles.map(({ lat, lng, ...rest }) => rest);
+
+    saveRosterCsv(rosterVehicles);
+    roster = rosterVehicles;
+    locations = buildLocations(roster);
+
+    const active = rosterVehicles.filter((v) => v.status === "active").length;
+    const offboard = rosterVehicles.filter((v) => v.status === "offboard").length;
+    console.log(`Roster refreshed: ${rosterVehicles.length} vehicles (${active} active, ${offboard} offboard, ${locations.length} locations)`);
+
+    res.json({
+      ok: true,
+      total: rosterVehicles.length,
+      active,
+      offboard,
+      locations: locations.length,
+    });
+  } catch (err) {
+    console.error("Roster refresh error:", err.message);
+    res.status(500).json({ error: "Failed to refresh roster: " + err.message });
+  }
+});
+
 // Audit log API
 app.post("/api/audit-log", (req, res) => {
   const entry = {
