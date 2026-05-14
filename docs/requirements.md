@@ -123,17 +123,32 @@ A hub manager photographs the spare-key box; the app reads the vehicle numbers o
 
 ### 4.3 Audit Lifecycle / Status Model
 
+Each submission carries an `ocr_state` (managed by the queue / worker) and — in a later phase — a `review_state` (managed by the central reviewer). v1 implements `ocr_state` end-to-end. `review_state` is planned but not yet built.
+
+**OCR state machine** (implemented in db.js, see §4.6 for the retry curve):
+
 ```
-submitted ── reviewer opens ──► in_review ── finalize ──► finalized
-     │                              │
-     │                              └── request retake ──► rejected_for_retake
-     │
-     └── (no review action in N days) ──► stale (alert fleet ops)
+pending ──► processing ──► ready              (happy path; result available)
+   ▲              │
+   │              └──► failed ──► (after backoff) ──► processing ─┐
+   │                                                              │
+   └──── retry endpoint, or worker pickup ────────────────────────┘
+                  │
+                  └──► (6 attempts exhausted) ──► exhausted (manual retry only)
+```
+
+**Review state machine** (planned, not yet built):
+
+```
+ready ──► reviewer opens ──► in_review ──► finalize ──► finalized
+                                  │
+                                  └── request retake ──► rejected_for_retake
 ```
 
 - **FR-3.1** Submissions are immutable; edits during review live on the *audit* record (one-to-one with submission for v1).
 - **FR-3.2** Hub managers can submit multiple times for the same audit period. Each submission is a separate record. Only one is finalized as the canonical audit for that period; others stay as history.
-- **FR-3.3** Status transitions are timestamped and logged.
+- **FR-3.3** Status transitions are timestamped (`ocr_completed_at` for OCR; finalize/retake timestamps when those are built).
+- **FR-3.4** A submission whose OCR is in any non-ready state cannot be finalized.
 
 ### 4.4 Action Items & Planner Sync
 
@@ -151,22 +166,42 @@ submitted ── reviewer opens ──► in_review ── finalize ──► fi
 - **FR-5.2** Reconciliation always uses the roster as of the time of *audit finalization*, not the time of submission. Store the snapshot used on each finalized audit for repeatability.
 - **FR-5.3** Manual roster overrides (e.g., a key reassigned outside of OneStep) — **OPEN: needed for v1, or wait?**
 
+### 4.6 OCR Job Queue & Retry Behavior
+
+OCR runs asynchronously after submission. The field user never waits for OCR to complete; they get an immediate confirmation and walk away.
+
+- **FR-6.1** `POST /api/submissions` persists the photo + metadata and returns within 1 second with `{id, state: "pending"}`. OCR has not yet run at that point.
+- **FR-6.2** A background worker (in-process, single-concurrency) polls every 30 seconds, claims the oldest eligible submission, and runs the OCR pipeline. The worker's first tick fires on server startup (so submissions queued during downtime are processed immediately on restart).
+- **FR-6.3** On Anthropic API failure (529 overloaded, network error, etc.), the submission moves to `failed` with the next retry scheduled per the backoff curve below. No fallback to a weaker model — always Opus 4.7.
+- **FR-6.4** **Backoff curve** (cumulative wall-clock from first failure): 1 min → 5 min → 30 min → 2 hr → 6 hr → 24 hr.
+- **FR-6.5** After 6 failed attempts (total elapsed ≈ 33 hr), the submission transitions to `exhausted`. An admin alert must fire (see §10 Q22) and the row requires a manual retry via the inbox or the `POST /api/submissions/:id/retry` endpoint.
+- **FR-6.6** Manual retry (any state in `{failed, exhausted}`) resets the submission to `pending` for immediate re-pickup by the worker. Attempt count is preserved for telemetry.
+
 ---
 
 ## 5. Non-Functional Requirements
 
 ### 5.1 Performance
 
-- Field flow: photo upload and submission confirmation in under 10 seconds on cellular.
-- Central flow: OCR results visible within 30 seconds of opening a submission in review (whether generated on submit or on first review).
-- Page load under 3 seconds on a typical phone over hub wifi.
+- **Field flow** (synchronous): photo upload and submission confirmation in under 10 seconds on cellular. The user does **not** wait for OCR — they get a "received" confirmation immediately.
+- **OCR processing** (async): typical end-to-end ≈ 10–30 seconds from submission to `ready` under normal API load. On 529 / throttling, processing may be delayed by up to 33 hours before exhaustion; admin alert fires after 24 hours of accumulated retries.
+- **Central inbox**: full page render under 2 seconds; auto-refresh polls every 10 seconds.
+- **Page load** under 3 seconds on a typical phone over hub wifi.
 
 ### 5.2 OCR Accuracy
 
-- **Recall target:** ≥95% of clearly visible vehicle numbers detected per audit. Current measurement: ~98% on one test photo (n=3 runs). Needs validation across 3–5 photos before locking the target.
-- **False positive target:** ≤1 unflagged hallucination per audit. Uncertain (`?`) hallucinations acceptable but must be visually distinct in the UI.
-- **Consistency:** ≥90% of detected numbers should be stable across re-runs of the same photo.
-- **Out of scope:** detecting tags that are physically illegible (handwriting too faded, tag flipped) — human judgment fills these gaps.
+Validated on **2 photos** through 6 successful runs as of 2026-05-14 (recall computed against high-confidence ground truth confirmed with Leigh):
+
+| Photo | Tags in GT | Tags detected | False positives | Consistency across 3 runs |
+|---|---|---|---|---|
+| Photo 1 | 15 | 15 (100%) | 0 | identical output |
+| Photo 2 | 12 | 12 (100%) | 0 | identical output |
+
+- **Recall target:** ≥95% of legitimate TNS-branded tag numbers detected per audit. Achieved 100% on the two validation photos.
+- **False positive target:** ≤1 unflagged hallucination per audit. Achieved 0 on both validation photos.
+- **Consistency target:** identical output across re-runs of the same photo. Achieved 6/6 runs (3 per photo).
+- **Out of scope:** detecting tags that aren't TNS-branded (handwritten generic labels, slot/hanger tags, fuel-card numbers) — these are intentionally excluded by the OCR prompt (see [[project-valid-tag-signals]]).
+- **Generalization risk:** validated on only 2 photos. Recall and false-positive numbers may shift on different lighting, hub layouts, or denser boxes. See task #18.
 
 ### 5.3 Availability
 
@@ -194,22 +229,42 @@ submitted ── reviewer opens ──► in_review ── finalize ──► fi
 
 ### 6.1 Entities
 
-- **`Submission`** — raw field upload. Fields: id, hub_id, submitter_user_id, photo_blob_ref, note, status, created_at, status_updated_at.
-- **`Audit`** — finalized output. Fields: id, submission_id (FK), final_chip_list (JSON), reconciliation (4 buckets), roster_snapshot_ref, finalized_by_user_id, finalized_at.
+**Implemented in v1 (see `db.js`):**
+
+- **`Submission`** — the field upload, the OCR job, and (later) the audit basis. One row per upload.
+
+  | Column | Type | Notes |
+  |---|---|---|
+  | `id` | TEXT PK | `subm_` + 12 random hex chars |
+  | `photo_path` | TEXT | filename inside `uploads/` (server-resolves to absolute) |
+  | `hub` | TEXT | e.g. `"CT - Fairfield"` |
+  | `submitter_name` | TEXT | manual entry today; auto from SSO later |
+  | `note` | TEXT NULLABLE | optional free-text note |
+  | `created_at` | TEXT (ISO) | submission timestamp |
+  | `ocr_state` | TEXT | `pending` / `processing` / `ready` / `failed` / `exhausted` |
+  | `ocr_attempts` | INTEGER | count of OCR attempts (caps at 6) |
+  | `ocr_last_error` | TEXT NULLABLE | last error message (truncated to 500 chars) |
+  | `ocr_next_retry_at` | TEXT (ISO) NULLABLE | when worker should re-attempt this failed row |
+  | `ocr_result` | TEXT (JSON) NULLABLE | `{ numbers, expectedCount, rotation, passDetails }` |
+  | `ocr_completed_at` | TEXT (ISO) NULLABLE | when `ready` was reached |
+
+**Planned for v2 (not yet built):**
+
+- **`Audit`** — finalized output. Fields: id, submission_id (FK), final_chip_list (JSON, reviewer-edited), reconciliation (4 buckets), roster_snapshot_ref, finalized_by_user_id, finalized_at.
 - **`ActionItem`** — denormalized for the cross-hub board. Fields: id, audit_id (FK), action_type (move/locate/remove), vehicle_number, source_hub, destination_hub (nullable), planner_task_id, status (open/closed), closed_by_audit_id (nullable).
-- **`Vehicle`** — roster record. Fields: vehicle_number, assigned_location, current_address, status (active/offboard), as_of_timestamp.
-- **`Hub`** — derived list. Fields: code (e.g., "CT - Fairfield"), state, sort_order.
-- **`User`** — projection of Entra user info, cached locally. Fields: entra_oid, email, name, role (hub_manager / fleet_ops / leadership), default_hub (nullable).
+- **`Vehicle`** — roster record (currently lives in `vehicle_roster.csv`; will migrate to DB). Fields: vehicle_number, assigned_location, current_address, status (active/offboard), as_of_timestamp.
+- **`Hub`** — derived list. Fields: code, state, sort_order.
+- **`User`** — projection of Entra user info, cached locally. Fields: entra_oid, email, name, role, default_hub.
 
 ### 6.2 Audit Lifecycle
 
-See §4.3 diagram. Statuses: `submitted` → `in_review` → `finalized` | `rejected_for_retake` | `stale`.
+See §4.3. OCR states are implemented; review states are planned.
 
 ### 6.3 Storage
 
-- **Application data** (submissions, audits, action items, roster snapshots): SQLite file mounted on durable Azure App Service storage, or Postgres if multi-instance scaling is ever needed (unlikely at this volume). **OPEN: SQLite vs. SharePoint list vs. Postgres.**
-- **Photos:** SharePoint document library on the TNS tenant. Access controlled via the same SSO; deep-linkable from the app.
-- **Secrets:** Azure Key Vault (preferred) or App Service config.
+- **Application data**: **SQLite** in `data/app.db` (WAL mode, FK enforcement). Single-process, file-on-disk. Decision rationale: at 15–30 audits/month volume, no need for Postgres or multi-instance scaling; SQLite-on-volume is simpler operationally and the project's existing flat-file pattern (CSV roster, JSON audit log) suggested low ceremony. Closes original Q14.
+- **Photos**: filesystem in `uploads/` folder for v1 (gitignored). Production deployment must mount this on persistent storage on the host (Azure App Service mounted disk, or upgrade to SharePoint document library as originally planned). **OPEN: when do we migrate from local disk → SharePoint?**
+- **Secrets**: `.env` file in dev; Azure Key Vault or App Service config in production.
 
 ---
 
@@ -217,9 +272,11 @@ See §4.3 diagram. Statuses: `submitted` → `in_review` → `finalized` | `reje
 
 ### 7.1 Anthropic API (OCR)
 
-- Model: `claude-opus-4-7` for OCR passes. May revisit if newer Opus released.
-- 3 parallel passes per audit (kept for robustness despite cost; cost at this volume is ~$50/year).
-- API key in Azure config or Key Vault.
+- Model: `claude-opus-4-7` for **all** OCR passes. **No fallback to weaker models** — if Opus is unavailable, we queue and retry rather than degrade accuracy (see §4.6).
+- 3 parallel passes per audit, prompted with explicit valid-tag-vs-noise rules (see [[project-valid-tag-signals]]).
+- Consensus merge: ≥2 of 3 passes required for inclusion; partial agreement flagged with `?`; singletons dropped.
+- Cost at projected volume (30/mo × 3 passes Opus): **~$47/year**.
+- API key in `.env` (dev) / Azure Key Vault (prod).
 
 ### 7.2 OneStep GPS (Roster Source)
 
@@ -295,9 +352,13 @@ Track and resolve before / during build. Each should have an owner.
 | Q11 | Manual roster overrides supported in v1, or out of scope? | Fleet Ops |
 | Q12 | Scheduled auto-refresh of OneStep GPS roster (daily? weekly? manual only?) | Fleet Ops |
 | Q13 | Confirm `keyaudit.thenextstreet.com` subdomain availability and CNAME setup | IT |
-| Q14 | Storage: SQLite-on-volume vs SharePoint list vs Postgres? | Engineering / IT |
+| ~~Q14~~ | ~~Storage: SQLite-on-volume vs SharePoint list vs Postgres?~~ | **DECIDED 2026-05-14**: SQLite-on-volume for v1 (see §6.3) |
 | Q15 | Staging environment required for v1? | Engineering / Fleet Ops |
 | Q16 | OCR accuracy target: lock at 95% recall, or revise after more photo validation? | Leigh / Fleet Ops |
+| Q17 | When do photos migrate from local disk → SharePoint document library? | Engineering / IT |
+| Q18 | Admin-alert mechanism when an OCR job hits `exhausted` (email, Teams DM, dashboard banner)? | Fleet Ops / IT |
+| Q19 | Should the inbox be paginated or filtered by default? At what backlog size does a flat list stop being usable? | Fleet Ops |
+| Q20 | Worker concurrency: stay single-process, or move to a real job queue (e.g. BullMQ) before deploying multi-instance? | Engineering |
 
 ---
 
@@ -322,12 +383,22 @@ These were considered and explicitly deferred. Re-raise in v2 if needed.
 
 A v1 release is shippable when:
 
+**OCR + submission flow:**
+- [x] **OCR pipeline returns identical, accurate results across re-runs** of the same photo (validated 2026-05-14 on 2 photos × 3 runs each).
+- [ ] OCR pipeline achieves ≥95% recall on a validation set of ≥5 photos with varied conditions (current: 100% on 2 photos; need 3+ more — task #18).
+- [x] **`POST /api/submissions` returns within 1 second**; OCR completes asynchronously.
+- [x] **OCR backoff and exhaustion behavior validated** (see `scripts/test-retry-flow.js`).
+- [ ] Submission and worker state survive a server restart (no data loss; pending rows resume processing).
+
+**Field flow:**
 - [ ] Field user can submit a photo end-to-end from a phone in under 2 minutes (target: 90 seconds).
-- [ ] OCR pipeline (post-fixes) achieves ≥95% recall on a validation set of ≥5 photos with varied conditions.
-- [ ] Central reviewer can finalize an audit in under 5 minutes from opening the submission.
+
+**Central flow:**
+- [ ] Central reviewer can finalize an audit in under 5 minutes from opening the submission (review UI not yet built).
 - [ ] Finalizing an audit auto-generates correctly-scoped Planner tasks (verified on 3 audits with different bucket distributions).
+
+**Platform / pilot:**
 - [ ] SSO works for both field and central roles; correct role-based access verified.
-- [ ] Photo storage persists across app restarts (no data loss in a redeploy test).
 - [ ] Roster refresh from OneStep GPS completes successfully end-to-end (the now-fixed code path).
 - [ ] At least one pilot hub (one manager, one fleet ops reviewer) has run the full flow with real photos over a 2-week period without showstopper issues.
 
