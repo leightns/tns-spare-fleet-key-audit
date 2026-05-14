@@ -181,30 +181,34 @@ app.post("/api/analyze", upload.single("photo"), async (req, res) => {
   }
 
   try {
-    const ocrPrompt = `You are analyzing a photo of vehicle spare keys hanging on hooks or laid out for a fleet management audit.
+    const ocrPrompt = `You are analyzing a photo of vehicle spare keys for a fleet management audit at "The Next Street" driving school. Identify the vehicle number on every VALID TNS KEY TAG in the image.
 
-TASK: Identify every vehicle number visible on key tags/fobs in this image.
+WHAT COUNTS AS A VALID TNS KEY TAG (only these — ignore everything else):
+- Small (~1-2 inch) rectangular plastic tag, attached to a key or key fob by a metal ring
+- Most are WHITE with blue "THE NEXT STREET" text and a red/orange X-shaped logo
+- Some are colorful "Drive Politely" branded tags (rainbow-colored, compass-style design)
+- Each valid tag has a 2-4 digit vehicle number printed or handwritten on it (e.g. 44, 179, 201, 282, 1023)
 
-Key tags for "The Next Street" driving school typically have:
-- A colored plastic key tag (often blue, red, green, yellow, or white)
-- A vehicle number printed/written on the tag (2-4 digits like 44, 201, 252, 1023)
-- Sometimes the company name or an "X" logo
+DO NOT REPORT NUMBERS FROM ANY OF THE FOLLOWING (these are NOT vehicle tags, even though they have numbers):
+- Fuel cards (WEX, Exxon Mobil, or similar credit-card-shaped items). TNS stores a spare gas card alongside the keys, so they often appear in audit photos. Their account numbers (like "0455 00 114582 0", "5529-1", "8 LL3848") and any "HONDA CIVIC 249" / vehicle-model labels printed ON the card are NOT vehicle key tags. Skip them entirely.
+- Slot or hanger tags from inside the key storage box. These are small plastic numbered tags (typically 001-050) that identify hooks/slots in the storage box itself. They are not attached to keys. Skip them.
+- Barcodes, serial numbers, sticker IDs, QR codes, or any other numbered labels.
+
+ONLY include numbers that are clearly printed/written on a TNS-BRANDED tag (logo visible) or a "Drive Politely" colored tag, attached to a key.
 
 INSTRUCTIONS - Think step by step:
-1. First, scan the ENTIRE image systematically. Divide it into quadrants (top-left, top-right, bottom-left, bottom-right) and examine each.
-2. Count every key tag you can see - there may be 10, 20, 30+ keys in the image.
-3. For EACH key tag, read the number. Describe its position and color to stay organized.
-4. Some tags may be:
+1. Scan the ENTIRE image systematically. Divide into quadrants and examine each.
+2. For each numbered item you see, FIRST decide: is this a valid TNS key tag (logo visible, attached to a key) or is it something to ignore (fuel card, slot tag, barcode)?
+3. For valid tags only, read the vehicle number. Describe its position to stay organized.
+4. Some valid tags may be:
    - Upside down or sideways - mentally rotate to read them
    - Partially hidden behind other keys - read what you can see
    - At steep angles - adjust perspective
-   - Small or blurry - give your best read with "?" suffix
-5. Double-check: go back through the image one more time to catch any you missed.
-
-IMPORTANT: These photos typically contain MANY keys (often 15-40+). If you only found a few, look again more carefully - you are likely missing keys.
+   - Small or blurry/handwritten - give your best read with "?" suffix
+5. Double-check: go back through the image once more, confirming each number you report is on a valid TNS key tag (not a fuel card or slot tag).
 
 After your analysis, output your final answer as a JSON object on its own line in this exact format:
-RESULT: {"count": <total key tags seen>, "numbers": ["201", "252", "283"]}`;
+RESULT: {"count": <total VALID TNS key tags seen>, "numbers": ["201", "252", "283"]}`;
 
     const pass2Extra = `\n\nFocus especially on:
 - Keys in the CORNERS and EDGES of the image that are easy to overlook
