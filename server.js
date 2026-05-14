@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const Anthropic = require("@anthropic-ai/sdk").default;
 const XLSX = require("xlsx");
+const sharp = require("sharp");
 
 const app = express();
 app.use(express.json());
@@ -139,6 +140,21 @@ app.get("/api/roster", (_req, res) => {
   res.json(roster);
 });
 
+// Normalize image orientation before OCR.
+// 1. Apply EXIF rotation (most cameras tag this; rotates pixels accordingly).
+// 2. If still portrait (H > W), rotate 270° CW — phones held vertically photographing
+//    a horizontal key-box scene leave tags running sideways in the pixel data.
+// Returns the rotated buffer and the rotation applied (in degrees, for diagnostics).
+async function preprocessImage(buffer) {
+  const exifNormalized = await sharp(buffer).rotate().toBuffer();
+  const meta = await sharp(exifNormalized).metadata();
+  if (meta.height > meta.width) {
+    const rotated = await sharp(exifNormalized).rotate(270).toBuffer();
+    return { buffer: rotated, applied: 270 };
+  }
+  return { buffer: exifNormalized, applied: 0 };
+}
+
 app.post("/api/analyze", upload.single("photo"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No photo uploaded" });
@@ -150,8 +166,19 @@ app.post("/api/analyze", upload.single("photo"), async (req, res) => {
   }
 
   const client = new Anthropic({ apiKey });
-  const base64Image = req.file.buffer.toString("base64");
   const mediaType = req.file.mimetype || "image/jpeg";
+
+  let base64Image;
+  let rotation = 0;
+  try {
+    const pre = await preprocessImage(req.file.buffer);
+    base64Image = pre.buffer.toString("base64");
+    rotation = pre.applied;
+    console.log(`Preprocess: applied ${rotation}° rotation`);
+  } catch (err) {
+    console.warn("Image preprocessing failed; using original:", err.message);
+    base64Image = req.file.buffer.toString("base64");
+  }
 
   try {
     const ocrPrompt = `You are analyzing a photo of vehicle spare keys hanging on hooks or laid out for a fleet management audit.
@@ -199,17 +226,17 @@ RESULT: {"count": <total key tags seen>, "numbers": ["201", "252", "283"]}`;
 
     const passes = await Promise.all([
       client.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-7",
         max_tokens: 4096,
         messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt }] }],
       }),
       client.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-7",
         max_tokens: 4096,
         messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + pass2Extra }] }],
       }),
       client.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-7",
         max_tokens: 4096,
         messages: [{ role: "user", content: [imageContent, { type: "text", text: ocrPrompt + pass3Extra }] }],
       }),
@@ -240,7 +267,7 @@ RESULT: {"count": <total key tags seen>, "numbers": ["201", "252", "283"]}`;
       return { count: 0, numbers: [] };
     });
 
-    // Merge: union of all numbers found across passes, track frequency
+    // Merge: track frequency across passes
     const freq = {};
     let maxCount = 0;
     passResults.forEach(p => {
@@ -254,12 +281,17 @@ RESULT: {"count": <total key tags seen>, "numbers": ["201", "252", "283"]}`;
       });
     });
 
-    // Build merged result: include all numbers, mark uncertain if only seen once or flagged
-    const merged = Object.entries(freq).map(([num, f]) => {
-      if (f.seen === 1 && passResults.length > 1) return num + "?"; // Only one pass saw it
-      if (f.uncertain > f.seen / 2) return num + "?"; // Majority uncertain
-      return num;
-    });
+    // Consensus merge: require >=2 of 3 passes to include (drops singleton hallucinations).
+    // Unanimous + clean = confident; partial agreement or uncertainty = flagged with "?".
+    const totalPasses = passResults.length;
+    const minVotes = totalPasses >= 3 ? 2 : 1;
+    const merged = Object.entries(freq)
+      .filter(([, f]) => f.seen >= minVotes)
+      .map(([num, f]) => {
+        if (f.seen < totalPasses) return num + "?";
+        if (f.uncertain > f.seen / 2) return num + "?";
+        return num;
+      });
 
     // Sort numerically
     merged.sort((a, b) => {
@@ -273,6 +305,7 @@ RESULT: {"count": <total key tags seen>, "numbers": ["201", "252", "283"]}`;
     res.json({
       numbers: merged,
       expectedCount: maxCount,
+      rotation,
       passDetails: passResults.map(p => ({ count: p.count, found: p.numbers.length })),
     });
   } catch (err) {
@@ -529,11 +562,11 @@ app.post("/api/refresh-roster", async (_req, res) => {
     console.log(`Converted to ${vehicles.length} vehicles. Reverse geocoding addresses...`);
 
     // Only reverse geocode active vehicles (saves ~200 API calls / ~4 min)
-    const active = vehicles.filter((v) => v.status === "active");
-    const inactive = vehicles.filter((v) => v.status !== "active");
-    console.log(`Geocoding ${active.length} active vehicles (skipping ${inactive.length} offboard)...`);
-    const geocoded = await batchReverseGeocode(active);
-    vehicles = [...geocoded, ...inactive];
+    const activeVehicles = vehicles.filter((v) => v.status === "active");
+    const inactiveVehicles = vehicles.filter((v) => v.status !== "active");
+    console.log(`Geocoding ${activeVehicles.length} active vehicles (skipping ${inactiveVehicles.length} offboard)...`);
+    const geocoded = await batchReverseGeocode(activeVehicles);
+    vehicles = [...geocoded, ...inactiveVehicles];
 
     // Remove lat/lng helper fields before saving
     const rosterVehicles = vehicles.map(({ lat, lng, ...rest }) => rest);
