@@ -2,4 +2,9 @@ node_modules/
 .env
 audit_log.json
 samples/
+uploads/
+data/
+.claude/
+
+
 

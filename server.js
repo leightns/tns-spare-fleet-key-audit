@@ -3,13 +3,29 @@ const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const Anthropic = require("@anthropic-ai/sdk").default;
 const XLSX = require("xlsx");
 const sharp = require("sharp");
+const submissionsDb = require("./db");
 
 const app = express();
 app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+function saveUploadedPhoto(buffer, mimeType) {
+  const ext = mimeType === "image/png" ? "png" : "jpg";
+  const filename = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}.${ext}`;
+  fs.writeFileSync(path.join(UPLOADS_DIR, filename), buffer);
+  return filename;
+}
+
+function photoAbsPath(filename) {
+  return path.join(UPLOADS_DIR, filename);
+}
 
 // Audit log file
 const AUDIT_LOG_PATH = path.join(__dirname, "audit_log.json");
@@ -155,33 +171,23 @@ async function preprocessImage(buffer) {
   return { buffer: exifNormalized, applied: 0 };
 }
 
-app.post("/api/analyze", upload.single("photo"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No photo uploaded" });
-  }
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured on server" });
-  }
-
-  const client = new Anthropic({ apiKey });
-  const mediaType = req.file.mimetype || "image/jpeg";
-
+// Run the full OCR pipeline (preprocess → 3 parallel passes → consensus merge).
+// Returns { numbers, expectedCount, rotation, passDetails }.
+// Throws on Anthropic API failure so callers can decide retry strategy.
+async function runOCR(client, buffer, mediaType = "image/jpeg") {
   let base64Image;
   let rotation = 0;
   try {
-    const pre = await preprocessImage(req.file.buffer);
+    const pre = await preprocessImage(buffer);
     base64Image = pre.buffer.toString("base64");
     rotation = pre.applied;
     console.log(`Preprocess: applied ${rotation}° rotation`);
   } catch (err) {
     console.warn("Image preprocessing failed; using original:", err.message);
-    base64Image = req.file.buffer.toString("base64");
+    base64Image = buffer.toString("base64");
   }
 
-  try {
-    const ocrPrompt = `You are analyzing a photo of vehicle spare keys for a fleet management audit at "The Next Street" driving school. Identify the vehicle number on every VALID TNS KEY TAG in the image.
+  const ocrPrompt = `You are analyzing a photo of vehicle spare keys for a fleet management audit at "The Next Street" driving school. Identify the vehicle number on every VALID TNS KEY TAG in the image.
 
 WHAT COUNTS AS A VALID TNS KEY TAG (only these — ignore everything else):
 - Small (~1-2 inch) rectangular plastic tag, attached to a key or key fob by a metal ring
@@ -306,12 +312,23 @@ RESULT: {"count": <total VALID TNS key tags seen>, "numbers": ["201", "252", "28
 
     console.log(`OCR passes found: [${passResults.map(p => p.numbers.length).join(", ")}] keys. Merged: ${merged.length}. Expected: ${maxCount}`);
 
-    res.json({
-      numbers: merged,
-      expectedCount: maxCount,
-      rotation,
-      passDetails: passResults.map(p => ({ count: p.count, found: p.numbers.length })),
-    });
+  return {
+    numbers: merged,
+    expectedCount: maxCount,
+    rotation,
+    passDetails: passResults.map(p => ({ count: p.count, found: p.numbers.length })),
+  };
+}
+
+app.post("/api/analyze", upload.single("photo"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No photo uploaded" });
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured on server" });
+  try {
+    const client = new Anthropic({ apiKey });
+    const mediaType = req.file.mimetype || "image/jpeg";
+    const result = await runOCR(client, req.file.buffer, mediaType);
+    res.json(result);
   } catch (err) {
     console.error("Anthropic API error:", err.message);
     res.status(500).json({ error: "Failed to analyze image: " + err.message });
@@ -613,6 +630,63 @@ app.get("/api/audit-log", (_req, res) => {
   res.json(loadAuditLog());
 });
 
+// ---- Submissions API (field flow: queue-based, OCR happens asynchronously) ----
+
+app.post("/api/submissions", upload.single("photo"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No photo uploaded" });
+  const hub = (req.body.hub || "").trim();
+  const submitterName = (req.body.submitter_name || "").trim();
+  const note = (req.body.note || "").trim();
+  if (!hub) return res.status(400).json({ error: "hub is required" });
+  if (!submitterName) return res.status(400).json({ error: "submitter_name is required" });
+
+  try {
+    const photoFilename = saveUploadedPhoto(req.file.buffer, req.file.mimetype);
+    const sub = submissionsDb.insertSubmission({
+      photoPath: photoFilename,
+      hub,
+      submitterName,
+      note,
+    });
+    res.status(201).json({
+      id: sub.id,
+      state: sub.ocr_state,
+      created_at: sub.created_at,
+      message: "Received. Fleet ops will follow up.",
+    });
+  } catch (err) {
+    console.error("Submission failed:", err.message);
+    res.status(500).json({ error: "Failed to save submission: " + err.message });
+  }
+});
+
+app.get("/api/submissions", (req, res) => {
+  const state = req.query.state ? String(req.query.state) : undefined;
+  res.json(submissionsDb.listSubmissions({ state }));
+});
+
+app.get("/api/submissions/:id", (req, res) => {
+  const sub = submissionsDb.getSubmission(req.params.id);
+  if (!sub) return res.status(404).json({ error: "Submission not found" });
+  res.json(sub);
+});
+
+app.post("/api/submissions/:id/retry", (req, res) => {
+  const sub = submissionsDb.requestRetry(req.params.id);
+  if (!sub) return res.status(404).json({ error: "Submission not found" });
+  res.json(sub);
+});
+
+// Photos are served from /uploads/<filename> for the inbox UI.
+app.use("/uploads", express.static(UPLOADS_DIR, {
+  setHeaders: (res) => res.set("Cache-Control", "private, max-age=3600"),
+}));
+
+// Central-team inbox view.
+app.get("/inbox", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "inbox.html"));
+});
+
 // Serve static files with no-cache headers to prevent stale versions
 app.use(express.static(path.join(__dirname, "public"), {
   etag: false,
@@ -624,7 +698,48 @@ app.use(express.static(path.join(__dirname, "public"), {
   },
 }));
 
+// ---- Background OCR worker ----
+// Polls every WORKER_POLL_MS, claims one pending submission at a time,
+// runs the OCR pipeline against the on-disk photo, marks ready/failed.
+// On failure, db.js schedules the next retry per the backoff curve.
+
+const WORKER_POLL_MS = 30 * 1000;
+let workerBusy = false;
+
+async function processOnePending() {
+  if (workerBusy) return; // single concurrent job at a time
+  const claimed = submissionsDb.claimNextForProcessing();
+  if (!claimed) return;
+  workerBusy = true;
+  console.log(`[worker] processing ${claimed.id} (attempt ${claimed.ocr_attempts})`);
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
+    const buffer = fs.readFileSync(photoAbsPath(claimed.photo_path));
+    const client = new Anthropic({ apiKey });
+    const result = await runOCR(client, buffer, "image/jpeg");
+    submissionsDb.markReady(claimed.id, result);
+    console.log(`[worker] ${claimed.id} ready (${result.numbers.length} numbers, ${result.rotation}° rotation)`);
+  } catch (err) {
+    submissionsDb.markFailed(claimed.id, err.message);
+    console.warn(`[worker] ${claimed.id} failed: ${err.message}`);
+  } finally {
+    workerBusy = false;
+  }
+}
+
+function startWorker() {
+  // Run once on startup so any submissions queued during downtime get picked up,
+  // then poll on an interval.
+  processOnePending().catch(err => console.error("[worker] startup run failed:", err));
+  setInterval(() => {
+    processOnePending().catch(err => console.error("[worker] tick failed:", err));
+  }, WORKER_POLL_MS);
+  console.log(`[worker] started, polling every ${WORKER_POLL_MS / 1000}s`);
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  startWorker();
 });

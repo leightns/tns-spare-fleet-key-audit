@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TNS Spare Key Audit — Inbox</title>
+  <style>
+    :root {
+      --primary: #1a3a5c;
+      --bg: #f5f7fa;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --text-light: #6b7280;
+      --border: #e5e7eb;
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --info: #2563eb;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .header {
+      background: var(--primary);
+      color: white;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+    .header .meta { font-size: 13px; opacity: 0.85; }
+    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+
+    .empty {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--text-light);
+    }
+
+    .submission {
+      background: var(--card);
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      overflow: hidden;
+      transition: box-shadow 0.2s;
+    }
+    .submission:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.10); }
+    .row {
+      display: grid;
+      grid-template-columns: 80px 140px 1fr 200px 110px;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 18px;
+      cursor: pointer;
+    }
+    .thumb {
+      width: 64px;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .hub { font-weight: 600; font-size: 15px; }
+    .submitter { font-size: 13px; color: var(--text-light); margin-top: 2px; }
+    .note {
+      font-size: 13px;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .note-empty { color: var(--text-light); font-style: italic; }
+    .timestamp { font-size: 13px; color: var(--text-light); text-align: right; }
+    .state {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+    .state-pending { background: #fef3c7; color: var(--warning); }
+    .state-processing { background: #dbeafe; color: var(--info); }
+    .state-ready { background: #d1fae5; color: var(--success); }
+    .state-failed { background: #fee2e2; color: var(--danger); }
+    .state-exhausted { background: #fce7f3; color: #be185d; }
+
+    .detail {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 16px 18px;
+      background: #fafbfc;
+    }
+    .submission.expanded .detail { display: block; }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    .detail-img {
+      width: 100%;
+      max-height: 400px;
+      object-fit: contain;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: white;
+    }
+    .detail h3 {
+      font-size: 14px;
+      color: var(--primary);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .chip {
+      padding: 4px 10px;
+      background: #e8f0fe;
+      color: var(--primary);
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .chip.uncertain { background: #fef3c7; color: var(--warning); }
+    .kv { font-size: 13px; margin-bottom: 6px; }
+    .kv b { color: var(--text-light); margin-right: 6px; }
+    .error-text {
+      background: #fee2e2;
+      color: var(--danger);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-top: 8px;
+      font-family: ui-monospace, monospace;
+    }
+    .actions { margin-top: 12px; display: flex; gap: 8px; }
+    .btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: #2a5a8c; }
+    .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+
+    @media (max-width: 720px) {
+      .row { grid-template-columns: 64px 1fr 90px; gap: 12px; padding: 12px; }
+      .row .timestamp, .row .note { display: none; }
+      .detail-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>TNS SPARE KEY AUDIT — INBOX</h1>
+    <div class="meta">
+      <span id="counts">loading…</span> · auto-refresh every <span id="refresh-sec">10</span>s
+    </div>
+  </div>
+
+  <div class="container">
+    <div id="list"></div>
+    <div id="empty" class="empty" style="display:none;">
+      No submissions yet. Field staff submissions will appear here.
+    </div>
+  </div>
+
+  <script>
+    const list = document.getElementById("list");
+    const empty = document.getElementById("empty");
+    const counts = document.getElementById("counts");
+    const expanded = new Set();
+
+    function relTime(iso) {
+      const d = new Date(iso);
+      const diffSec = (Date.now() - d.getTime()) / 1000;
+      if (diffSec < 60) return Math.round(diffSec) + "s ago";
+      if (diffSec < 3600) return Math.round(diffSec / 60) + "m ago";
+      if (diffSec < 86400) return Math.round(diffSec / 3600) + "h ago";
+      return Math.round(diffSec / 86400) + "d ago";
+    }
+
+    function renderChips(numbers) {
+      if (!numbers || !numbers.length) return '<span style="color:var(--text-light);font-size:13px;">No numbers found</span>';
+      return numbers.map(n => {
+        const uncertain = n.endsWith("?");
+        return `<span class="chip${uncertain ? " uncertain" : ""}">${n}</span>`;
+      }).join("");
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch("/api/submissions");
+        const items = await res.json();
+        if (!items.length) {
+          list.innerHTML = "";
+          empty.style.display = "block";
+          counts.textContent = "0 submissions";
+          return;
+        }
+        empty.style.display = "none";
+
+        const byState = {};
+        items.forEach(i => { byState[i.ocr_state] = (byState[i.ocr_state] || 0) + 1; });
+        counts.textContent = items.length + " total · " +
+          Object.entries(byState).map(([s, n]) => `${n} ${s}`).join(" · ");
+
+        list.innerHTML = items.map(s => renderSubmission(s)).join("");
+        list.querySelectorAll(".submission").forEach(el => {
+          if (expanded.has(el.dataset.id)) el.classList.add("expanded");
+          el.querySelector(".row").addEventListener("click", () => {
+            el.classList.toggle("expanded");
+            if (el.classList.contains("expanded")) expanded.add(el.dataset.id);
+            else expanded.delete(el.dataset.id);
+          });
+          const retryBtn = el.querySelector(".retry-btn");
+          if (retryBtn) {
+            retryBtn.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              retryBtn.disabled = true;
+              retryBtn.textContent = "Retrying…";
+              await fetch(`/api/submissions/${el.dataset.id}/retry`, { method: "POST" });
+              setTimeout(refresh, 300);
+            });
+          }
+        });
+      } catch (err) {
+        counts.textContent = "Failed to load: " + err.message;
+      }
+    }
+
+    function renderSubmission(s) {
+      const r = s.ocr_result || {};
+      const passes = r.passDetails || [];
+      const stateClass = "state-" + s.ocr_state;
+      const noteHtml = s.note ? `<div class="note">${escapeHtml(s.note)}</div>` : `<div class="note note-empty">no note</div>`;
+      const showRetry = s.ocr_state === "failed" || s.ocr_state === "exhausted";
+
+      return `
+        <div class="submission" data-id="${s.id}">
+          <div class="row">
+            <img class="thumb" src="/uploads/${s.photo_path}" alt="" loading="lazy">
+            <div>
+              <div class="hub">${escapeHtml(s.hub)}</div>
+              <div class="submitter">${escapeHtml(s.submitter_name)}</div>
+            </div>
+            ${noteHtml}
+            <div>
+              <div class="timestamp">${relTime(s.created_at)}</div>
+              <div class="timestamp" style="font-size:11px;">${s.id}</div>
+            </div>
+            <div><span class="state ${stateClass}">${s.ocr_state}</span></div>
+          </div>
+          <div class="detail">
+            <div class="detail-grid">
+              <div>
+                <h3>Photo</h3>
+                <img class="detail-img" src="/uploads/${s.photo_path}" alt="">
+              </div>
+              <div>
+                <h3>OCR Result</h3>
+                ${s.ocr_state === "ready"
+                  ? `<div class="chips">${renderChips(r.numbers)}</div>
+                     <div class="kv"><b>Rotation:</b> ${r.rotation}° CW</div>
+                     <div class="kv"><b>Vision count:</b> ${r.expectedCount}</div>
+                     <div class="kv"><b>Passes:</b> ${passes.map(p => p.found).join(" / ")} found (of ${passes.map(p => p.count).join(" / ")} detected)</div>
+                     <div class="kv"><b>Completed:</b> ${relTime(s.ocr_completed_at)}</div>`
+                  : s.ocr_state === "processing"
+                    ? `<p style="color:var(--info);">Currently processing…</p>`
+                    : s.ocr_state === "pending"
+                      ? `<p style="color:var(--warning);">Queued. Worker polls every 30s.</p>`
+                      : s.ocr_state === "failed"
+                        ? `<p style="color:var(--danger);">Attempt ${s.ocr_attempts} failed. Next retry: ${s.ocr_next_retry_at ? new Date(s.ocr_next_retry_at).toLocaleString() : "—"}.</p>
+                           <div class="error-text">${escapeHtml(s.ocr_last_error || "")}</div>`
+                        : `<p style="color:var(--danger);">All ${s.ocr_attempts} attempts exhausted. Manual intervention needed.</p>
+                           <div class="error-text">${escapeHtml(s.ocr_last_error || "")}</div>`
+                }
+                ${showRetry ? `<div class="actions"><button class="btn btn-primary retry-btn">Retry now</button></div>` : ""}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(s) {
+      if (s == null) return "";
+      return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    }
+
+    refresh();
+    setInterval(refresh, 10 * 1000);
+  </script>
+</body>
+</html>
