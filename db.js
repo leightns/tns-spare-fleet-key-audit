@@ -33,6 +33,40 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_submissions_created
     ON submissions(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS audits (
+    id                  TEXT PRIMARY KEY,
+    submission_id       TEXT NOT NULL UNIQUE REFERENCES submissions(id),
+    hub                 TEXT NOT NULL,
+    final_chip_list     TEXT NOT NULL,
+    reconciliation      TEXT NOT NULL,
+    finalized_by_name   TEXT NOT NULL,
+    finalized_at        TEXT NOT NULL,
+    roster_snapshot     TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_audits_hub
+    ON audits(hub, finalized_at DESC);
+
+  CREATE TABLE IF NOT EXISTS action_items (
+    id                  TEXT PRIMARY KEY,
+    audit_id            TEXT NOT NULL REFERENCES audits(id),
+    action_type         TEXT NOT NULL,
+    vehicle_number      TEXT NOT NULL,
+    source_hub          TEXT NOT NULL,
+    destination_hub     TEXT,
+    status              TEXT NOT NULL DEFAULT 'open',
+    planner_task_id     TEXT,
+    created_at          TEXT NOT NULL,
+    closed_at           TEXT,
+    closed_by_audit_id  TEXT REFERENCES audits(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_action_items_status
+    ON action_items(status, source_hub);
+
+  CREATE INDEX IF NOT EXISTS idx_action_items_audit
+    ON action_items(audit_id);
 `);
 
 function newId() {
@@ -145,6 +179,89 @@ function hydrateRow(row) {
   };
 }
 
+// ---- Audits ----
+
+function newAuditId() {
+  return "aud_" + crypto.randomBytes(6).toString("hex");
+}
+
+function insertAudit({ submissionId, hub, finalChipList, reconciliation, finalizedByName, rosterSnapshot }) {
+  const id = newAuditId();
+  db.prepare(`
+    INSERT INTO audits (id, submission_id, hub, final_chip_list, reconciliation, finalized_by_name, finalized_at, roster_snapshot)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    submissionId,
+    hub,
+    JSON.stringify(finalChipList),
+    JSON.stringify(reconciliation),
+    finalizedByName,
+    nowIso(),
+    JSON.stringify(rosterSnapshot),
+  );
+  return getAudit(id);
+}
+
+function getAudit(id) {
+  const row = db.prepare("SELECT * FROM audits WHERE id = ?").get(id);
+  return row ? hydrateAudit(row) : null;
+}
+
+function getAuditBySubmission(submissionId) {
+  const row = db.prepare("SELECT * FROM audits WHERE submission_id = ?").get(submissionId);
+  return row ? hydrateAudit(row) : null;
+}
+
+function listAudits({ hub } = {}) {
+  const rows = hub
+    ? db.prepare("SELECT * FROM audits WHERE hub = ? ORDER BY finalized_at DESC").all(hub)
+    : db.prepare("SELECT * FROM audits ORDER BY finalized_at DESC").all();
+  return rows.map(hydrateAudit);
+}
+
+function hydrateAudit(row) {
+  return {
+    ...row,
+    final_chip_list: row.final_chip_list ? JSON.parse(row.final_chip_list) : [],
+    reconciliation: row.reconciliation ? JSON.parse(row.reconciliation) : null,
+    roster_snapshot: row.roster_snapshot ? JSON.parse(row.roster_snapshot) : null,
+  };
+}
+
+// ---- Action items ----
+
+function newActionId() {
+  return "act_" + crypto.randomBytes(6).toString("hex");
+}
+
+function insertActionItem({ auditId, actionType, vehicleNumber, sourceHub, destinationHub, plannerTaskId }) {
+  const id = newActionId();
+  db.prepare(`
+    INSERT INTO action_items (id, audit_id, action_type, vehicle_number, source_hub, destination_hub, status, planner_task_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)
+  `).run(id, auditId, actionType, vehicleNumber, sourceHub, destinationHub || null, plannerTaskId || null, nowIso());
+  return db.prepare("SELECT * FROM action_items WHERE id = ?").get(id);
+}
+
+function listActionItems({ status, sourceHub, auditId } = {}) {
+  const where = [];
+  const args = [];
+  if (status) { where.push("status = ?"); args.push(status); }
+  if (sourceHub) { where.push("source_hub = ?"); args.push(sourceHub); }
+  if (auditId) { where.push("audit_id = ?"); args.push(auditId); }
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+  return db.prepare(`SELECT * FROM action_items ${whereSql} ORDER BY created_at DESC`).all(...args);
+}
+
+function closeActionItem(id, closedByAuditId) {
+  db.prepare(`
+    UPDATE action_items
+    SET status = 'closed', closed_at = ?, closed_by_audit_id = ?
+    WHERE id = ? AND status = 'open'
+  `).run(nowIso(), closedByAuditId || null, id);
+}
+
 module.exports = {
   insertSubmission,
   getSubmission,
@@ -155,4 +272,11 @@ module.exports = {
   requestRetry,
   MAX_ATTEMPTS,
   BACKOFF_SECONDS,
+  insertAudit,
+  getAudit,
+  getAuditBySubmission,
+  listAudits,
+  insertActionItem,
+  listActionItems,
+  closeActionItem,
 };

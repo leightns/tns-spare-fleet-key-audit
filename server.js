@@ -8,6 +8,7 @@ const Anthropic = require("@anthropic-ai/sdk").default;
 const XLSX = require("xlsx");
 const submissionsDb = require("./db");
 const { runOCR } = require("./ocr");
+const { reconcile } = require("./reconciliation");
 
 const app = express();
 app.use(express.json());
@@ -523,6 +524,101 @@ app.post("/api/submissions/:id/retry", (req, res) => {
   const sub = submissionsDb.requestRetry(req.params.id);
   if (!sub) return res.status(404).json({ error: "Submission not found" });
   res.json(sub);
+});
+
+// Stub for Microsoft Planner integration. Logs the tasks that would be created
+// so we have visibility while we wait on credentials / plan-structure decisions.
+// See docs/planner-design.md for the planned implementation.
+function plannerSyncStub(audit, actionItems) {
+  if (!actionItems.length) {
+    console.log(`[planner-stub] audit ${audit.id}: no action items to sync`);
+    return;
+  }
+  console.log(`[planner-stub] audit ${audit.id} (${audit.hub}): would create ${actionItems.length} task(s):`);
+  actionItems.forEach(a => {
+    if (a.action_type === "move") {
+      console.log(`  [planner-stub]   Move key #${a.vehicle_number} from ${a.source_hub} → ${a.destination_hub}`);
+    } else if (a.action_type === "locate") {
+      console.log(`  [planner-stub]   Locate missing key #${a.vehicle_number} (assigned to ${a.source_hub})`);
+    } else if (a.action_type === "remove") {
+      console.log(`  [planner-stub]   Remove offboarded key #${a.vehicle_number} from ${a.source_hub} spare box`);
+    }
+  });
+}
+
+// Finalize a submission: take the reviewer-edited chip list, reconcile against
+// the current roster, persist the audit + action items, and stub Planner sync.
+app.post("/api/submissions/:id/finalize", (req, res) => {
+  const sub = submissionsDb.getSubmission(req.params.id);
+  if (!sub) return res.status(404).json({ error: "Submission not found" });
+  if (sub.ocr_state !== "ready") {
+    return res.status(409).json({ error: `Submission OCR state is "${sub.ocr_state}"; cannot finalize until "ready"` });
+  }
+  // Prevent re-finalizing the same submission.
+  if (submissionsDb.getAuditBySubmission(sub.id)) {
+    return res.status(409).json({ error: "Submission already finalized" });
+  }
+
+  const chipList = Array.isArray(req.body.chip_list) ? req.body.chip_list : null;
+  const finalizedByName = (req.body.finalized_by_name || "").trim();
+  if (!chipList) return res.status(400).json({ error: "chip_list (array) is required" });
+  if (!finalizedByName) return res.status(400).json({ error: "finalized_by_name is required" });
+  if (finalizedByName.length > 80) return res.status(400).json({ error: "finalized_by_name too long (max 80 chars)" });
+
+  // Reconcile against the current roster, snapshot the roster used for repeatability.
+  const { buckets, actionItems } = reconcile(chipList, sub.hub, roster);
+  const audit = submissionsDb.insertAudit({
+    submissionId: sub.id,
+    hub: sub.hub,
+    finalChipList: chipList,
+    reconciliation: buckets,
+    finalizedByName,
+    rosterSnapshot: roster,
+  });
+
+  // Persist action items, capture inserted rows for response + stub planner sync.
+  const persistedActions = actionItems.map(a => submissionsDb.insertActionItem({
+    auditId: audit.id,
+    actionType: a.actionType,
+    vehicleNumber: a.vehicleNumber,
+    sourceHub: a.sourceHub,
+    destinationHub: a.destinationHub,
+  }));
+
+  plannerSyncStub(audit, persistedActions);
+
+  // Auto-close logic (per requirements §4.4 FR-4.4): when a key now belongs here,
+  // close any open "move ... → this hub" action items targeting this vehicle.
+  buckets.belongHere.forEach(v => {
+    const openMoves = submissionsDb.listActionItems({ status: "open" }).filter(
+      a => a.action_type === "move" && a.vehicle_number === v.vehicle_number && a.destination_hub === sub.hub
+    );
+    openMoves.forEach(om => submissionsDb.closeActionItem(om.id, audit.id));
+  });
+
+  res.json({
+    audit,
+    actionItems: persistedActions,
+  });
+});
+
+app.get("/api/audits", (req, res) => {
+  const hub = req.query.hub ? String(req.query.hub) : undefined;
+  res.json(submissionsDb.listAudits({ hub }));
+});
+
+app.get("/api/audits/:id", (req, res) => {
+  const a = submissionsDb.getAudit(req.params.id);
+  if (!a) return res.status(404).json({ error: "Audit not found" });
+  res.json(a);
+});
+
+app.get("/api/action-items", (req, res) => {
+  const filters = {};
+  if (req.query.status) filters.status = String(req.query.status);
+  if (req.query.source_hub) filters.sourceHub = String(req.query.source_hub);
+  if (req.query.audit_id) filters.auditId = String(req.query.audit_id);
+  res.json(submissionsDb.listActionItems(filters));
 });
 
 // Photos are served from /uploads/<filename> for the inbox UI.
