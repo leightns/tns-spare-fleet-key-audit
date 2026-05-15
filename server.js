@@ -256,57 +256,48 @@ async function fetchOneStepDevices() {
     }
   }
 
-  // Try multiple group endpoint variants
-  let groupMap = {};
-  const groupEndpoints = ["group", "groups", "device-group", "device-groups"];
+  // Try group endpoint variants. Each group entry includes a device_id_list
+  // we use to build an inverse device_id -> [group names] map.
+  let groupMap = {};                    // group_id -> group_name
+  const deviceToGroups = {};            // device_id -> [group_name, ...]
+  const groupEndpoints = ["device-group", "device-groups", "group", "groups"];
   for (const ep of groupEndpoints) {
     try {
       const groupsRes = await fetch(`${ONESTEP_BASE}/${ep}?api-key=${apiKey}`);
-      if (groupsRes.ok) {
-        const groupsData = await groupsRes.json();
-        console.log(`Groups endpoint /${ep} succeeded:`, JSON.stringify(groupsData).slice(0, 500));
-        const groupList = groupsData.result_list || groupsData || [];
-        (Array.isArray(groupList) ? groupList : []).forEach((g) => {
-          const id = g.group_id || g.id;
-          const name = g.group_name || g.name || g.display_name || "";
-          if (id) groupMap[id] = name;
-        });
-        if (Object.keys(groupMap).length > 0) {
-          console.log(`Loaded ${Object.keys(groupMap).length} groups from /${ep}`);
-          break;
-        }
-      } else {
+      if (!groupsRes.ok) {
         console.log(`Groups endpoint /${ep} returned ${groupsRes.status}`);
+        continue;
+      }
+      const groupsData = await groupsRes.json();
+      const groupList = groupsData.result_list || groupsData || [];
+      (Array.isArray(groupList) ? groupList : []).forEach((g) => {
+        // OneStep's /device-group response uses `device_group_id`; older shapes use `group_id` or `id`.
+        const id = g.device_group_id || g.group_id || g.id;
+        const name = g.group_name || g.name || g.display_name || "";
+        if (id && name) groupMap[id] = name;
+        // Forward mapping group -> devices, invert to device -> [groups]
+        const deviceIds = g.device_id_list || g.device_ids || [];
+        if (name && Array.isArray(deviceIds)) {
+          deviceIds.forEach((deviceId) => {
+            if (!deviceToGroups[deviceId]) deviceToGroups[deviceId] = [];
+            if (!deviceToGroups[deviceId].includes(name)) deviceToGroups[deviceId].push(name);
+          });
+        }
+      });
+      if (Object.keys(groupMap).length > 0) {
+        console.log(`Loaded ${Object.keys(groupMap).length} groups from /${ep}; ${Object.keys(deviceToGroups).length} devices mapped to at least one group`);
+        break;
       }
     } catch (err) {
       console.log(`Groups endpoint /${ep} failed: ${err.message}`);
     }
   }
 
-  // If no group endpoint worked, try to extract group info from devices themselves
   if (Object.keys(groupMap).length === 0) {
-    console.log("No group endpoint worked. Extracting group info from device data...");
-    deviceList.forEach((d) => {
-      // Check for inline group data
-      const groups = d.groups || d.group_list || d.device_groups || [];
-      if (Array.isArray(groups)) {
-        groups.forEach((g) => {
-          if (typeof g === "object") {
-            const id = g.group_id || g.id;
-            const name = g.group_name || g.name || g.display_name || "";
-            if (id && name) groupMap[id] = name;
-          }
-        });
-      }
-    });
-    if (Object.keys(groupMap).length > 0) {
-      console.log(`Extracted ${Object.keys(groupMap).length} groups from device data`);
-    } else {
-      console.log("WARNING: Could not resolve any group names. Using display_name for group assignment.");
-    }
+    console.log("WARNING: Could not resolve any group names from OneStep.");
   }
 
-  return { devices: deviceList, groupMap };
+  return { devices: deviceList, groupMap, deviceToGroups };
 }
 
 // Reverse geocode lat/lng to address using OpenStreetMap Nominatim
@@ -324,64 +315,56 @@ async function reverseGeocode(lat, lng) {
   }
 }
 
-// Batch reverse geocode with rate limiting (1 req/sec for Nominatim)
+// Batch reverse geocode with rate limiting (1 req/sec for Nominatim).
+// Writes the resolved address to `current_address` so saveRosterCsv picks it up.
 async function batchReverseGeocode(items) {
   const results = [];
   for (const item of items) {
     if (item.lat && item.lng) {
-      const address = await reverseGeocode(item.lat, item.lng);
-      results.push({ ...item, address });
+      const current_address = await reverseGeocode(item.lat, item.lng);
+      results.push({ ...item, current_address });
       // Rate limit: 1 request per second for Nominatim
       if (items.indexOf(item) < items.length - 1) {
         await new Promise((r) => setTimeout(r, 1100));
       }
     } else {
-      results.push({ ...item, address: "" });
+      results.push({ ...item });
     }
   }
   return results;
 }
 
-function convertOneStepToRoster(devices, groupMap) {
-  const hasGroupMap = Object.keys(groupMap).length > 0;
-
+function convertOneStepToRoster(devices, groupMap, deviceToGroups) {
   return devices.map((d) => {
     const displayName = d.display_name || d.device_id || "";
     const point = d.latest_device_point || d.latest_accurate_device_point || {};
     const lat = point.lat || 0;
     const lng = point.lng || 0;
 
-    // Try multiple ways to resolve group names
-    let groupNames = [];
+    // Group resolution, in priority order:
+    //   1. deviceToGroups inverse mapping built from /device-group response
+    //   2. d.device_groups_name_list when populated by OneStep on the device record
+    //   3. d.device_groups_id_list resolved via groupMap
+    //   4. Older shapes (legacy fallbacks)
+    let groupNames = (deviceToGroups && deviceToGroups[d.device_id]) || [];
 
-    if (hasGroupMap) {
-      // Use group map to resolve IDs to names
-      const groupIds = d.group_id_list || d.group_ids || [];
-      groupNames = (Array.isArray(groupIds) ? groupIds : [groupIds])
+    if (groupNames.length === 0 && Array.isArray(d.device_groups_name_list)) {
+      groupNames = d.device_groups_name_list.filter(Boolean);
+    }
+    if (groupNames.length === 0 && Array.isArray(d.device_groups_id_list)) {
+      groupNames = d.device_groups_id_list.map((id) => groupMap[id] || "").filter(Boolean);
+    }
+    if (groupNames.length === 0) {
+      const legacyIds = d.group_id_list || d.group_ids || [];
+      groupNames = (Array.isArray(legacyIds) ? legacyIds : [legacyIds])
         .map((id) => groupMap[id] || "")
         .filter(Boolean);
     }
 
-    // If no group names from IDs, try inline group objects
-    if (groupNames.length === 0) {
-      const inlineGroups = d.groups || d.group_list || d.device_groups || [];
-      if (Array.isArray(inlineGroups)) {
-        inlineGroups.forEach((g) => {
-          if (typeof g === "string") groupNames.push(g);
-          else if (typeof g === "object") {
-            const name = g.group_name || g.name || g.display_name || "";
-            if (name) groupNames.push(name);
-          }
-        });
-      }
-    }
-
-    // Log for debugging first few devices
     if (devices.indexOf(d) < 3) {
-      console.log(`Device "${displayName}": groupNames=[${groupNames.join(", ")}], active_state=${d.active_state}`);
+      console.log(`Device "${displayName}" (${d.device_id}): groupNames=[${groupNames.join(", ")}], active_state=${d.active_state}`);
     }
 
-    // Determine location and status
     let status = "active";
     let assignedLocation = "";
 
@@ -393,7 +376,6 @@ function convertOneStepToRoster(devices, groupMap) {
       assignedLocation = locationParts[0] || groupNames[0] || "";
     }
 
-    // Also check active_state from the device
     if (d.active_state === "deactivated" || d.active_state === "inactive") {
       status = "offboard";
     }
@@ -413,10 +395,10 @@ function convertOneStepToRoster(devices, groupMap) {
 app.post("/api/refresh-roster", async (_req, res) => {
   try {
     console.log("Refreshing roster from OneStep GPS...");
-    const { devices, groupMap } = await fetchOneStepDevices();
+    const { devices, groupMap, deviceToGroups } = await fetchOneStepDevices();
     console.log(`Fetched ${devices.length} devices and ${Object.keys(groupMap).length} groups`);
 
-    let vehicles = convertOneStepToRoster(devices, groupMap);
+    let vehicles = convertOneStepToRoster(devices, groupMap, deviceToGroups);
     console.log(`Converted to ${vehicles.length} vehicles. Reverse geocoding addresses...`);
 
     // Only reverse geocode active vehicles (saves ~200 API calls / ~4 min)
