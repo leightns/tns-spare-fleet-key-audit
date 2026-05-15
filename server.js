@@ -9,6 +9,7 @@ const XLSX = require("xlsx");
 const submissionsDb = require("./db");
 const { runOCR } = require("./ocr");
 const { reconcile } = require("./reconciliation");
+const fleetAgent = require("./fleet_agent");
 
 const app = express();
 app.use(express.json());
@@ -72,22 +73,10 @@ function loadRoster() {
 }
 
 let roster = loadRoster();
-let locations = buildLocations(roster);
-console.log(`Loaded ${roster.length} vehicles from roster`);
-
-function buildLocations(rosterData) {
-  return [
-    ...new Set(
-      rosterData
-        .filter((v) => v.status === "active" && v.assigned_location)
-        .map((v) => v.assigned_location)
-    ),
-  ].sort((a, b) => {
-    const aState = a.startsWith("CT") ? 0 : 1;
-    const bState = b.startsWith("CT") ? 0 : 1;
-    if (aState !== bState) return aState - bState;
-    return a.localeCompare(b);
-  });
+let locations = fleetAgent.deriveHubs(roster);
+console.log(`Loaded ${roster.length} vehicles from roster; ${locations.length} hubs in picker`);
+if (locations.length === 0) {
+  console.warn("Hub picker is empty. The current vehicle_roster.csv may predate the Location Type column — POST /api/refresh-roster to repopulate from tns-fleet-agent's xlsx.");
 }
 
 // Convert GPS xlsx to roster CSV
@@ -140,11 +129,17 @@ function convertXlsxToRoster(buffer) {
 
 function saveRosterCsv(vehicles) {
   const csvPath = path.join(__dirname, "vehicle_roster.csv");
-  const header = "vehicle_number,assigned_location,current_address,status";
-  const lines = vehicles.map((v) => {
-    const addr = v.current_address.includes(",") ? `"${v.current_address}"` : v.current_address;
-    return `${v.vehicle_number},${v.assigned_location},${addr},${v.status}`;
-  });
+  const header = "vehicle_number,assigned_location,current_address,status,location_type,zones,last_updated";
+  const q = s => (s || "").includes(",") ? `"${(s || "").replace(/"/g, '""')}"` : (s || "");
+  const lines = vehicles.map((v) => [
+    v.vehicle_number,
+    v.assigned_location || "",
+    q(v.current_address),
+    v.status || "",
+    v.location_type || "",
+    q(v.zones),
+    v.last_updated || "",
+  ].join(","));
   fs.writeFileSync(csvPath, [header, ...lines].join("\n"));
 }
 
@@ -181,7 +176,7 @@ app.post("/api/upload-roster", upload.single("roster"), (req, res) => {
     const vehicles = convertXlsxToRoster(req.file.buffer);
     saveRosterCsv(vehicles);
     roster = vehicles;
-    locations = buildLocations(roster);
+    locations = fleetAgent.deriveHubs(roster);
     const active = vehicles.filter((v) => v.status === "active").length;
     const offboard = vehicles.filter((v) => v.status === "offboard").length;
     console.log(`Roster updated: ${vehicles.length} vehicles (${active} active, ${offboard} offboard)`);
@@ -209,222 +204,38 @@ app.get("/api/roster-info", (_req, res) => {
   });
 });
 
-// OneStep GPS API integration
-const ONESTEP_BASE = "https://track.onestepgps.com/v3/api/public";
 
-async function fetchOneStepDevices() {
-  const apiKey = process.env.ONESTEP_API_KEY;
-  if (!apiKey) throw new Error("ONESTEP_API_KEY not configured");
-
-  // Fetch all devices with pagination (API defaults to 100 per page; we use 200 to be safe)
-  const PAGE_SIZE = 200;
-  let allDevices = [];
-  let offset = 0;
-
-  while (true) {
-    const devicesRes = await fetch(
-      `${ONESTEP_BASE}/device?latest_point=true&limit=${PAGE_SIZE}&offset=${offset}&api-key=${apiKey}`
-    );
-    if (!devicesRes.ok) throw new Error(`OneStep devices API returned ${devicesRes.status}`);
-    const devicesData = await devicesRes.json();
-
-    const page = devicesData.result_list || devicesData || [];
-    const pageList = Array.isArray(page) ? page : [];
-    allDevices = allDevices.concat(pageList);
-    console.log(`Fetched offset=${offset}: ${pageList.length} devices (running total: ${allDevices.length})`);
-
-    // Done when this page is shorter than requested
-    if (pageList.length < PAGE_SIZE) break;
-
-    offset += PAGE_SIZE;
-    if (offset > 10000) { console.warn("Pagination safety limit reached"); break; }
-  }
-
-  // Log first device structure to help debug group mapping
-  const deviceList = allDevices;
-  if (deviceList.length > 0) {
-    const sample = deviceList[0];
-    console.log("Sample device keys:", Object.keys(sample).join(", "));
-    console.log("Sample device_id:", sample.device_id);
-    console.log("Sample display_name:", sample.display_name);
-    console.log("Sample active_state:", sample.active_state);
-    // Log all group-related and status-related fields
-    for (const key of Object.keys(sample)) {
-      if (key.toLowerCase().includes("group") || key.toLowerCase().includes("state") || key.toLowerCase().includes("status")) {
-        console.log(`Sample ${key}:`, JSON.stringify(sample[key]));
-      }
-    }
-  }
-
-  // Try group endpoint variants. Each group entry includes a device_id_list
-  // we use to build an inverse device_id -> [group names] map.
-  let groupMap = {};                    // group_id -> group_name
-  const deviceToGroups = {};            // device_id -> [group_name, ...]
-  const groupEndpoints = ["device-group", "device-groups", "group", "groups"];
-  for (const ep of groupEndpoints) {
-    try {
-      const groupsRes = await fetch(`${ONESTEP_BASE}/${ep}?api-key=${apiKey}`);
-      if (!groupsRes.ok) {
-        console.log(`Groups endpoint /${ep} returned ${groupsRes.status}`);
-        continue;
-      }
-      const groupsData = await groupsRes.json();
-      const groupList = groupsData.result_list || groupsData || [];
-      (Array.isArray(groupList) ? groupList : []).forEach((g) => {
-        // OneStep's /device-group response uses `device_group_id`; older shapes use `group_id` or `id`.
-        const id = g.device_group_id || g.group_id || g.id;
-        const name = g.group_name || g.name || g.display_name || "";
-        if (id && name) groupMap[id] = name;
-        // Forward mapping group -> devices, invert to device -> [groups]
-        const deviceIds = g.device_id_list || g.device_ids || [];
-        if (name && Array.isArray(deviceIds)) {
-          deviceIds.forEach((deviceId) => {
-            if (!deviceToGroups[deviceId]) deviceToGroups[deviceId] = [];
-            if (!deviceToGroups[deviceId].includes(name)) deviceToGroups[deviceId].push(name);
-          });
-        }
-      });
-      if (Object.keys(groupMap).length > 0) {
-        console.log(`Loaded ${Object.keys(groupMap).length} groups from /${ep}; ${Object.keys(deviceToGroups).length} devices mapped to at least one group`);
-        break;
-      }
-    } catch (err) {
-      console.log(`Groups endpoint /${ep} failed: ${err.message}`);
-    }
-  }
-
-  if (Object.keys(groupMap).length === 0) {
-    console.log("WARNING: Could not resolve any group names from OneStep.");
-  }
-
-  return { devices: deviceList, groupMap, deviceToGroups };
-}
-
-// Reverse geocode lat/lng to address using OpenStreetMap Nominatim
-async function reverseGeocode(lat, lng) {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-      { headers: { "User-Agent": "TNS-Key-Audit-App/1.0" } }
-    );
-    if (!res.ok) return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    const data = await res.json();
-    return data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-  } catch {
-    return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-  }
-}
-
-// Batch reverse geocode with rate limiting (1 req/sec for Nominatim).
-// Writes the resolved address to `current_address` so saveRosterCsv picks it up.
-async function batchReverseGeocode(items) {
-  const results = [];
-  for (const item of items) {
-    if (item.lat && item.lng) {
-      const current_address = await reverseGeocode(item.lat, item.lng);
-      results.push({ ...item, current_address });
-      // Rate limit: 1 request per second for Nominatim
-      if (items.indexOf(item) < items.length - 1) {
-        await new Promise((r) => setTimeout(r, 1100));
-      }
-    } else {
-      results.push({ ...item });
-    }
-  }
-  return results;
-}
-
-function convertOneStepToRoster(devices, groupMap, deviceToGroups) {
-  return devices.map((d) => {
-    const displayName = d.display_name || d.device_id || "";
-    const point = d.latest_device_point || d.latest_accurate_device_point || {};
-    const lat = point.lat || 0;
-    const lng = point.lng || 0;
-
-    // Group resolution, in priority order:
-    //   1. deviceToGroups inverse mapping built from /device-group response
-    //   2. d.device_groups_name_list when populated by OneStep on the device record
-    //   3. d.device_groups_id_list resolved via groupMap
-    //   4. Older shapes (legacy fallbacks)
-    let groupNames = (deviceToGroups && deviceToGroups[d.device_id]) || [];
-
-    if (groupNames.length === 0 && Array.isArray(d.device_groups_name_list)) {
-      groupNames = d.device_groups_name_list.filter(Boolean);
-    }
-    if (groupNames.length === 0 && Array.isArray(d.device_groups_id_list)) {
-      groupNames = d.device_groups_id_list.map((id) => groupMap[id] || "").filter(Boolean);
-    }
-    if (groupNames.length === 0) {
-      const legacyIds = d.group_id_list || d.group_ids || [];
-      groupNames = (Array.isArray(legacyIds) ? legacyIds : [legacyIds])
-        .map((id) => groupMap[id] || "")
-        .filter(Boolean);
-    }
-
-    if (devices.indexOf(d) < 3) {
-      console.log(`Device "${displayName}" (${d.device_id}): groupNames=[${groupNames.join(", ")}], active_state=${d.active_state}`);
-    }
-
-    let status = "active";
-    let assignedLocation = "";
-
-    if (groupNames.length === 0 || groupNames.includes("Offboard") || groupNames.includes("N/A")) {
-      status = "offboard";
-      assignedLocation = "";
-    } else {
-      const locationParts = groupNames.filter((n) => n !== "PEP");
-      assignedLocation = locationParts[0] || groupNames[0] || "";
-    }
-
-    if (d.active_state === "deactivated" || d.active_state === "inactive") {
-      status = "offboard";
-    }
-
-    return {
-      vehicle_number: displayName,
-      assigned_location: assignedLocation,
-      current_address: "",
-      status,
-      lat,
-      lng,
-    };
-  });
-}
-
-// Refresh roster from OneStep GPS API
+// Refresh roster from tns-fleet-agent's nightly xlsx output.
+// tns-fleet-agent does the OneStep pull, Nominatim geocoding, and zone-based
+// classification (Hub/Kiosk/Home Vehicle/Instructor/Unknown). We just read it.
 app.post("/api/refresh-roster", async (_req, res) => {
   try {
-    console.log("Refreshing roster from OneStep GPS...");
-    const { devices, groupMap, deviceToGroups } = await fetchOneStepDevices();
-    console.log(`Fetched ${devices.length} devices and ${Object.keys(groupMap).length} groups`);
+    console.log(`Reading enriched roster from ${fleetAgent.xlsxPath()}`);
+    const vehicles = fleetAgent.readVehicleRoster();
+    saveRosterCsv(vehicles);
+    roster = vehicles;
+    locations = fleetAgent.deriveHubs(roster);
 
-    let vehicles = convertOneStepToRoster(devices, groupMap, deviceToGroups);
-    console.log(`Converted to ${vehicles.length} vehicles. Reverse geocoding addresses...`);
-
-    // Only reverse geocode active vehicles (saves ~200 API calls / ~4 min)
-    const activeVehicles = vehicles.filter((v) => v.status === "active");
-    const inactiveVehicles = vehicles.filter((v) => v.status !== "active");
-    console.log(`Geocoding ${activeVehicles.length} active vehicles (skipping ${inactiveVehicles.length} offboard)...`);
-    const geocoded = await batchReverseGeocode(activeVehicles);
-    vehicles = [...geocoded, ...inactiveVehicles];
-
-    // Remove lat/lng helper fields before saving
-    const rosterVehicles = vehicles.map(({ lat, lng, ...rest }) => rest);
-
-    saveRosterCsv(rosterVehicles);
-    roster = rosterVehicles;
-    locations = buildLocations(roster);
-
-    const active = rosterVehicles.filter((v) => v.status === "active").length;
-    const offboard = rosterVehicles.filter((v) => v.status === "offboard").length;
-    console.log(`Roster refreshed: ${rosterVehicles.length} vehicles (${active} active, ${offboard} offboard, ${locations.length} locations)`);
+    const counts = { hub: 0, kiosk: 0, home: 0, instructor: 0, unknown: 0 };
+    roster.forEach(v => {
+      const t = (v.location_type || "").toLowerCase().replace(" ", "_");
+      if (t === "hub") counts.hub++;
+      else if (t === "kiosk") counts.kiosk++;
+      else if (t === "home_vehicle") counts.home++;
+      else if (t === "instructor") counts.instructor++;
+      else counts.unknown++;
+    });
+    const active = roster.filter(v => v.status === "active").length;
+    const offboard = roster.filter(v => v.status === "offboard").length;
+    console.log(`Roster refreshed: ${roster.length} vehicles (${active} active, ${offboard} offboard); ${counts.hub} Hub, ${counts.kiosk} Kiosk, ${counts.home} Home Vehicle, ${counts.instructor} Instructor, ${counts.unknown} Unknown. Picker hubs: ${locations.length}`);
 
     res.json({
       ok: true,
-      total: rosterVehicles.length,
+      total: roster.length,
       active,
       offboard,
-      locations: locations.length,
+      hubs: locations.length,
+      breakdown: counts,
     });
   } catch (err) {
     console.error("Roster refresh error:", err.message);
