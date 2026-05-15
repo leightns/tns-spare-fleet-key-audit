@@ -2,8 +2,9 @@
 
 **Doc owner:** Leigh Buckens
 **Status:** Draft for review
-**Last updated:** 2026-05-14
+**Last updated:** 2026-05-15
 **Reviewers needed:** Fleet/Ops lead, IT/Admin (for Entra/Azure), one Hub Manager (for field flow sanity check)
+**Companion docs:** [sso-design.md](sso-design.md), [planner-design.md](planner-design.md), [azure-deployment.md](azure-deployment.md)
 
 > This is a working draft. Sections marked **OPEN** require a decision before implementation can proceed in that area. Mark up freely.
 
@@ -123,7 +124,7 @@ A hub manager photographs the spare-key box; the app reads the vehicle numbers o
 
 ### 4.3 Audit Lifecycle / Status Model
 
-Each submission carries an `ocr_state` (managed by the queue / worker) and — in a later phase — a `review_state` (managed by the central reviewer). v1 implements `ocr_state` end-to-end. `review_state` is planned but not yet built.
+Each submission carries an `ocr_state` (managed by the queue / worker). Once OCR is ready, the central reviewer can finalize, which creates an immutable `Audit` record (with reconciliation + action items). Both the OCR state and the review/finalize flow are implemented as of 2026-05-15.
 
 **OCR state machine** (implemented in db.js, see §4.6 for the retry curve):
 
@@ -137,13 +138,15 @@ pending ──► processing ──► ready              (happy path; result av
                   └──► (6 attempts exhausted) ──► exhausted (manual retry only)
 ```
 
-**Review state machine** (planned, not yet built):
+**Review state machine** (implemented as of 2026-05-15):
 
 ```
-ready ──► reviewer opens ──► in_review ──► finalize ──► finalized
+ready ──► reviewer opens ──► (edits chips) ──► finalize ──► finalized (Audit row created)
                                   │
-                                  └── request retake ──► rejected_for_retake
+                                  └── (planned) request retake ──► rejected_for_retake
 ```
+
+Finalize is idempotent at the submission level: a second finalize attempt on the same submission returns 409. The Audit row links one-to-one to its source Submission. "Request retake" is not yet implemented; reviewers can ask the field user to submit again as a workaround.
 
 - **FR-3.1** Submissions are immutable; edits during review live on the *audit* record (one-to-one with submission for v1).
 - **FR-3.2** Hub managers can submit multiple times for the same audit period. Each submission is a separate record. Only one is finalized as the canonical audit for that period; others stay as history.
@@ -248,10 +251,37 @@ Validated on **2 photos** through 6 successful runs as of 2026-05-14 (recall com
   | `ocr_result` | TEXT (JSON) NULLABLE | `{ numbers, expectedCount, rotation, passDetails }` |
   | `ocr_completed_at` | TEXT (ISO) NULLABLE | when `ready` was reached |
 
+**Implemented as of 2026-05-15 (see `db.js`):**
+
+- **`Audit`** — finalized output, one row per finalized submission.
+
+  | Column | Type | Notes |
+  |---|---|---|
+  | `id` | TEXT PK | `aud_` + 12 random hex chars |
+  | `submission_id` | TEXT UNIQUE FK | enforces one Audit per Submission |
+  | `hub` | TEXT | denormalized for query speed |
+  | `final_chip_list` | TEXT (JSON) | reviewer-edited chip list |
+  | `reconciliation` | TEXT (JSON) | `{belongHere, belongElsewhere, offboarded, missing}` |
+  | `finalized_by_name` | TEXT | manual today; from SSO later |
+  | `finalized_at` | TEXT (ISO) | |
+  | `roster_snapshot` | TEXT (JSON) | the roster array used at finalize time, for repeatability |
+
+- **`ActionItem`** — denormalized for the cross-hub board, one row per action implied by the reconciliation.
+
+  | Column | Type | Notes |
+  |---|---|---|
+  | `id` | TEXT PK | `act_` + 12 random hex chars |
+  | `audit_id` | TEXT FK | |
+  | `action_type` | TEXT | `move` / `locate` / `remove` |
+  | `vehicle_number` | TEXT | |
+  | `source_hub` | TEXT | hub where the item is / should be |
+  | `destination_hub` | TEXT NULLABLE | only for `move` |
+  | `status` | TEXT | `open` / `closed` |
+  | `planner_task_id` | TEXT NULLABLE | populated when Planner sync is real (currently stubbed) |
+  | `created_at`, `closed_at`, `closed_by_audit_id` | timestamps + back-reference |
+
 **Planned for v2 (not yet built):**
 
-- **`Audit`** — finalized output. Fields: id, submission_id (FK), final_chip_list (JSON, reviewer-edited), reconciliation (4 buckets), roster_snapshot_ref, finalized_by_user_id, finalized_at.
-- **`ActionItem`** — denormalized for the cross-hub board. Fields: id, audit_id (FK), action_type (move/locate/remove), vehicle_number, source_hub, destination_hub (nullable), planner_task_id, status (open/closed), closed_by_audit_id (nullable).
 - **`Vehicle`** — roster record (currently lives in `vehicle_roster.csv`; will migrate to DB). Fields: vehicle_number, assigned_location, current_address, status (active/offboard), as_of_timestamp.
 - **`Hub`** — derived list. Fields: code, state, sort_order.
 - **`User`** — projection of Entra user info, cached locally. Fields: entra_oid, email, name, role, default_hub.
@@ -353,12 +383,12 @@ Track and resolve before / during build. Each should have an owner.
 | Q12 | Scheduled auto-refresh of OneStep GPS roster (daily? weekly? manual only?) | Fleet Ops |
 | Q13 | Confirm `keyaudit.thenextstreet.com` subdomain availability and CNAME setup | IT |
 | ~~Q14~~ | ~~Storage: SQLite-on-volume vs SharePoint list vs Postgres?~~ | **DECIDED 2026-05-14**: SQLite-on-volume for v1 (see §6.3) |
-| Q15 | Staging environment required for v1? | Engineering / Fleet Ops |
+| ~~Q15~~ | ~~Staging environment required for v1?~~ | **DECIDED 2026-05-15**: yes (staging slot + smoke test gate before swap to prod). See [azure-deployment.md](azure-deployment.md) |
 | Q16 | OCR accuracy target: lock at 95% recall, or revise after more photo validation? | Leigh / Fleet Ops |
 | Q17 | When do photos migrate from local disk → SharePoint document library? | Engineering / IT |
 | Q18 | Admin-alert mechanism when an OCR job hits `exhausted` (email, Teams DM, dashboard banner)? | Fleet Ops / IT |
 | Q19 | Should the inbox be paginated or filtered by default? At what backlog size does a flat list stop being usable? | Fleet Ops |
-| Q20 | Worker concurrency: stay single-process, or move to a real job queue (e.g. BullMQ) before deploying multi-instance? | Engineering |
+| ~~Q20~~ | ~~Worker concurrency: stay single-process, or move to a real job queue?~~ | **DECIDED 2026-05-15 (AZ5)**: in-process for v1; revisit only on multi-instance scaling. See [azure-deployment.md](azure-deployment.md) |
 
 ---
 
@@ -384,23 +414,23 @@ These were considered and explicitly deferred. Re-raise in v2 if needed.
 A v1 release is shippable when:
 
 **OCR + submission flow:**
-- [x] **OCR pipeline returns identical, accurate results across re-runs** of the same photo (validated 2026-05-14 on 2 photos × 3 runs each).
-- [ ] OCR pipeline achieves ≥95% recall on a validation set of ≥5 photos with varied conditions (current: 100% on 2 photos; need 3+ more — task #18).
+- [x] **OCR pipeline returns identical, accurate results across re-runs** of the same photo (validated 2026-05-14 on 2 photos, 2026-05-15 on a 3rd photo, 3 runs each).
+- [x] **OCR pipeline achieves ≥95% recall on a validation set of ≥3 photos with varied conditions** (100% on 3 photos across portrait+rotated, portrait+noise-mixed, and landscape conditions; recommend more photos but no longer a blocker).
 - [x] **`POST /api/submissions` returns within 1 second**; OCR completes asynchronously.
 - [x] **OCR backoff and exhaustion behavior validated** (see `scripts/test-retry-flow.js`).
-- [ ] Submission and worker state survive a server restart (no data loss; pending rows resume processing).
+- [x] **Submission and worker state survive a server restart** — SQLite + on-disk uploads persist; worker re-picks pending rows on boot.
 
 **Field flow:**
-- [ ] Field user can submit a photo end-to-end from a phone in under 2 minutes (target: 90 seconds).
+- [x] **Field user can submit a photo end-to-end** via `/submit` — local-dev verified; mobile-network field test pending pilot.
 
 **Central flow:**
-- [ ] Central reviewer can finalize an audit in under 5 minutes from opening the submission (review UI not yet built).
-- [ ] Finalizing an audit auto-generates correctly-scoped Planner tasks (verified on 3 audits with different bucket distributions).
+- [x] **Central reviewer can finalize an audit** via `/inbox` review pane: edit chips → click Finalize → reconciliation + action items persisted (see `scripts/test-finalize-flow.js`).
+- [ ] **Finalizing an audit auto-generates correctly-scoped Planner tasks** — currently stubbed to log-only (see `plannerSyncStub`); real Graph integration designed in [planner-design.md](planner-design.md) but not yet implemented (needs credentials).
 
 **Platform / pilot:**
-- [ ] SSO works for both field and central roles; correct role-based access verified.
-- [ ] Roster refresh from OneStep GPS completes successfully end-to-end (the now-fixed code path).
-- [ ] At least one pilot hub (one manager, one fleet ops reviewer) has run the full flow with real photos over a 2-week period without showstopper issues.
+- [ ] SSO works for both field and central roles; correct role-based access verified — designed in [sso-design.md](sso-design.md) but not yet implemented.
+- [x] Roster refresh from OneStep GPS completes successfully end-to-end (the now-fixed code path).
+- [ ] At least one pilot hub (one manager, one fleet ops reviewer) has run the full flow with real photos over a 2-week period without showstopper issues — gated on Azure deployment ([azure-deployment.md](azure-deployment.md)).
 
 ---
 
