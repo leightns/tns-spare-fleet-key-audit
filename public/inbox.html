@@ -16,6 +16,7 @@
       --warning: #d97706;
       --danger: #dc2626;
       --info: #2563eb;
+      --purple: #7c3aed;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -32,9 +33,40 @@
       justify-content: space-between;
       align-items: baseline;
     }
-    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+    .header h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; }
     .header .meta { font-size: 13px; opacity: 0.85; }
-    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 16px 24px; }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 16px 0 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .tab {
+      background: none;
+      border: none;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-light);
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .tab.active {
+      background: var(--primary);
+      color: white;
+    }
+    .tab-badge {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.1);
+      font-size: 11px;
+    }
+    .tab.active .tab-badge { background: rgba(255,255,255,0.25); }
 
     .empty {
       background: var(--card);
@@ -44,18 +76,19 @@
       color: var(--text-light);
     }
 
+    /* ---- Inbox list ---- */
+
     .submission {
       background: var(--card);
       border-radius: 12px;
       margin-bottom: 12px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.06);
       overflow: hidden;
-      transition: box-shadow 0.2s;
     }
     .submission:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.10); }
     .row {
       display: grid;
-      grid-template-columns: 80px 140px 1fr 200px 110px;
+      grid-template-columns: 80px 200px 1fr 180px 110px;
       gap: 16px;
       align-items: center;
       padding: 14px 18px;
@@ -92,16 +125,20 @@
       letter-spacing: 0.5px;
       text-align: center;
     }
+    .state-pending, .state-processing, .state-ready, .state-failed, .state-exhausted, .state-finalized { display: inline-block; }
     .state-pending { background: #fef3c7; color: var(--warning); }
     .state-processing { background: #dbeafe; color: var(--info); }
     .state-ready { background: #d1fae5; color: var(--success); }
     .state-failed { background: #fee2e2; color: var(--danger); }
     .state-exhausted { background: #fce7f3; color: #be185d; }
+    .state-finalized { background: #ede9fe; color: var(--purple); }
+
+    /* ---- Review pane (expanded) ---- */
 
     .detail {
       display: none;
       border-top: 1px solid var(--border);
-      padding: 16px 18px;
+      padding: 20px;
       background: #fafbfc;
     }
     .submission.expanded .detail { display: block; }
@@ -112,48 +149,91 @@
     }
     .detail-img {
       width: 100%;
-      max-height: 400px;
+      max-height: 480px;
       object-fit: contain;
       border-radius: 8px;
       border: 1px solid var(--border);
       background: white;
     }
     .detail h3 {
-      font-size: 14px;
+      font-size: 13px;
       color: var(--primary);
       margin-bottom: 8px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      font-weight: 700;
     }
+    .detail-kv { font-size: 13px; margin-bottom: 4px; color: var(--text-light); }
+    .detail-kv b { color: var(--text); font-weight: 600; }
+
+    /* ---- Chip editing ---- */
+
     .chips {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin-bottom: 16px;
+      margin: 8px 0 14px;
+      min-height: 32px;
     }
     .chip {
-      padding: 4px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px 5px 12px;
       background: #e8f0fe;
       color: var(--primary);
-      border-radius: 12px;
+      border-radius: 16px;
       font-size: 14px;
       font-weight: 600;
     }
     .chip.uncertain { background: #fef3c7; color: var(--warning); }
-    .kv { font-size: 13px; margin-bottom: 6px; }
-    .kv b { color: var(--text-light); margin-right: 6px; }
-    .error-text {
-      background: #fee2e2;
-      color: var(--danger);
-      padding: 10px 12px;
-      border-radius: 6px;
+    .chip .remove {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(0,0,0,0.15);
+      color: inherit;
       font-size: 13px;
-      margin-top: 8px;
-      font-family: ui-monospace, monospace;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      padding: 0;
     }
-    .actions { margin-top: 12px; display: flex; gap: 8px; }
+    .chip .remove:hover { background: rgba(0,0,0,0.25); }
+
+    .add-chip {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .add-chip input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 2px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .add-chip input:focus { outline: none; border-color: var(--primary); }
+    .add-chip-help { font-size: 11px; color: var(--text-light); margin-top: -8px; margin-bottom: 16px; }
+
+    .reviewer-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 2px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 12px;
+      font-family: inherit;
+    }
+    .reviewer-input:focus { outline: none; border-color: var(--primary); }
+
+    .actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
     .btn {
-      padding: 8px 14px;
+      padding: 9px 16px;
       border: none;
       border-radius: 6px;
       font-size: 13px;
@@ -163,11 +243,125 @@
     .btn-primary { background: var(--primary); color: white; }
     .btn-primary:hover { background: #2a5a8c; }
     .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+    .btn-accent { background: #e8792f; color: white; }
+    .btn-accent:hover { background: #d06820; }
+    .btn-accent:disabled { background: #d1d5db; cursor: not-allowed; }
+    .btn-outline { background: white; color: var(--primary); border: 1px solid var(--primary); }
+    .btn-ghost { background: transparent; color: var(--text-light); }
+
+    .error-text {
+      background: #fee2e2;
+      color: var(--danger);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-top: 8px;
+      font-family: ui-monospace, monospace;
+    }
+
+    /* ---- Reconciliation buckets ---- */
+
+    .buckets {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .bucket {
+      background: white;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .bucket-header {
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: white;
+    }
+    .bucket-header .count {
+      float: right;
+      background: rgba(255,255,255,0.25);
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+    }
+    .bucket-belongHere .bucket-header { background: var(--success); }
+    .bucket-belongElsewhere .bucket-header { background: var(--info); }
+    .bucket-offboarded .bucket-header { background: var(--danger); }
+    .bucket-missing .bucket-header { background: var(--warning); }
+    .bucket-body { max-height: 240px; overflow-y: auto; }
+    .bucket-item {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .bucket-item:last-child { border-bottom: none; }
+    .bucket-item .num { font-weight: 700; color: var(--primary); font-size: 15px; }
+    .bucket-item .meta { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+    .bucket-item .badge {
+      display: inline-block;
+      background: #dbeafe;
+      color: var(--info);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
+    .bucket-empty {
+      padding: 12px;
+      text-align: center;
+      color: var(--text-light);
+      font-size: 12px;
+      font-style: italic;
+    }
+
+    /* ---- Action items tab ---- */
+
+    .action-group {
+      background: var(--card);
+      border-radius: 12px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+    .action-group-header {
+      background: var(--primary);
+      color: white;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .action-group-header .count {
+      float: right;
+      background: rgba(255,255,255,0.25);
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+    .action-item {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: 100px 80px 1fr 120px 100px;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+    }
+    .action-item:last-child { border-bottom: none; }
+    .action-type-move { background: #dbeafe; color: var(--info); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-align: center; }
+    .action-type-locate { background: #fef3c7; color: var(--warning); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-align: center; }
+    .action-type-remove { background: #fee2e2; color: var(--danger); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-align: center; }
 
     @media (max-width: 720px) {
       .row { grid-template-columns: 64px 1fr 90px; gap: 12px; padding: 12px; }
       .row .timestamp, .row .note { display: none; }
       .detail-grid { grid-template-columns: 1fr; }
+      .buckets { grid-template-columns: 1fr; }
+      .action-item { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -175,24 +369,58 @@
   <div class="header">
     <h1>TNS SPARE KEY AUDIT — INBOX</h1>
     <div class="meta">
-      <span id="counts">loading…</span> · auto-refresh every <span id="refresh-sec">10</span>s
+      <span id="counts">loading…</span> · auto-refresh every 10s
     </div>
   </div>
 
   <div class="container">
-    <div id="list"></div>
-    <div id="empty" class="empty" style="display:none;">
-      No submissions yet. Field staff submissions will appear here.
+    <div class="tabs">
+      <button class="tab active" data-tab="inbox">Inbox <span class="tab-badge" id="inbox-count">0</span></button>
+      <button class="tab" data-tab="actions">Open Action Items <span class="tab-badge" id="actions-count">0</span></button>
+    </div>
+
+    <div id="inbox-tab">
+      <div id="list"></div>
+      <div id="empty-list" class="empty" style="display:none;">
+        No submissions yet. Field staff submissions will appear here.
+      </div>
+    </div>
+
+    <div id="actions-tab" style="display:none;">
+      <div id="actions-list"></div>
+      <div id="empty-actions" class="empty" style="display:none;">
+        No open action items. (Action items appear once submissions are finalized.)
+      </div>
     </div>
   </div>
 
   <script>
+  (function() {
     const list = document.getElementById("list");
-    const empty = document.getElementById("empty");
+    const emptyList = document.getElementById("empty-list");
+    const actionsList = document.getElementById("actions-list");
+    const emptyActions = document.getElementById("empty-actions");
     const counts = document.getElementById("counts");
+    const inboxCount = document.getElementById("inbox-count");
+    const actionsCount = document.getElementById("actions-count");
     const expanded = new Set();
+    let editedChips = new Map();  // submission_id -> array of chips currently being edited
+    let activeTab = "inbox";
+
+    // ---- Tab handling ----
+    document.querySelectorAll(".tab").forEach(t => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+        t.classList.add("active");
+        activeTab = t.dataset.tab;
+        document.getElementById("inbox-tab").style.display = activeTab === "inbox" ? "block" : "none";
+        document.getElementById("actions-tab").style.display = activeTab === "actions" ? "block" : "none";
+        refresh();
+      });
+    });
 
     function relTime(iso) {
+      if (!iso) return "";
       const d = new Date(iso);
       const diffSec = (Date.now() - d.getTime()) / 1000;
       if (diffSec < 60) return Math.round(diffSec) + "s ago";
@@ -201,61 +429,71 @@
       return Math.round(diffSec / 86400) + "d ago";
     }
 
-    function renderChips(numbers) {
-      if (!numbers || !numbers.length) return '<span style="color:var(--text-light);font-size:13px;">No numbers found</span>';
-      return numbers.map(n => {
-        const uncertain = n.endsWith("?");
-        return `<span class="chip${uncertain ? " uncertain" : ""}">${n}</span>`;
-      }).join("");
+    function escapeHtml(s) {
+      if (s == null) return "";
+      return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     }
 
     async function refresh() {
       try {
-        const res = await fetch("/api/submissions");
-        const items = await res.json();
-        if (!items.length) {
-          list.innerHTML = "";
-          empty.style.display = "block";
-          counts.textContent = "0 submissions";
-          return;
-        }
-        empty.style.display = "none";
+        const [subs, audits, actions] = await Promise.all([
+          fetch("/api/submissions").then(r => r.json()),
+          fetch("/api/audits").then(r => r.json()),
+          fetch("/api/action-items?status=open").then(r => r.json()),
+        ]);
 
+        // Build a submission_id → audit lookup so we can show "finalized" state on rows.
+        const auditBySubmission = {};
+        audits.forEach(a => { auditBySubmission[a.submission_id] = a; });
+
+        // Effective state per submission:
+        const items = subs.map(s => ({ ...s, audit: auditBySubmission[s.id] || null }));
+        const effectiveState = s => s.audit ? "finalized" : s.ocr_state;
+
+        // Headline counts
         const byState = {};
-        items.forEach(i => { byState[i.ocr_state] = (byState[i.ocr_state] || 0) + 1; });
-        counts.textContent = items.length + " total · " +
+        items.forEach(i => {
+          const e = effectiveState(i);
+          byState[e] = (byState[e] || 0) + 1;
+        });
+        counts.textContent = items.length + " submissions · " +
           Object.entries(byState).map(([s, n]) => `${n} ${s}`).join(" · ");
 
-        list.innerHTML = items.map(s => renderSubmission(s)).join("");
-        list.querySelectorAll(".submission").forEach(el => {
-          if (expanded.has(el.dataset.id)) el.classList.add("expanded");
-          el.querySelector(".row").addEventListener("click", () => {
-            el.classList.toggle("expanded");
-            if (el.classList.contains("expanded")) expanded.add(el.dataset.id);
-            else expanded.delete(el.dataset.id);
-          });
-          const retryBtn = el.querySelector(".retry-btn");
-          if (retryBtn) {
-            retryBtn.addEventListener("click", async (e) => {
-              e.stopPropagation();
-              retryBtn.disabled = true;
-              retryBtn.textContent = "Retrying…";
-              await fetch(`/api/submissions/${el.dataset.id}/retry`, { method: "POST" });
-              setTimeout(refresh, 300);
-            });
+        inboxCount.textContent = items.filter(i => effectiveState(i) !== "finalized").length;
+        actionsCount.textContent = actions.length;
+
+        // ---- Inbox tab ----
+        if (activeTab === "inbox") {
+          if (!items.length) {
+            list.innerHTML = "";
+            emptyList.style.display = "block";
+          } else {
+            emptyList.style.display = "none";
+            list.innerHTML = items.map(s => renderSubmission(s, effectiveState(s))).join("");
+            wireSubmissionHandlers(items);
           }
-        });
+        }
+
+        // ---- Actions tab ----
+        if (activeTab === "actions") {
+          if (!actions.length) {
+            actionsList.innerHTML = "";
+            emptyActions.style.display = "block";
+          } else {
+            emptyActions.style.display = "none";
+            actionsList.innerHTML = renderActions(actions);
+          }
+        }
       } catch (err) {
         counts.textContent = "Failed to load: " + err.message;
       }
     }
 
-    function renderSubmission(s) {
+    function renderSubmission(s, state) {
       const r = s.ocr_result || {};
       const passes = r.passDetails || [];
-      const stateClass = "state-" + s.ocr_state;
+      const stateClass = "state-" + state;
       const noteHtml = s.note ? `<div class="note">${escapeHtml(s.note)}</div>` : `<div class="note note-empty">no note</div>`;
-      const showRetry = s.ocr_state === "failed" || s.ocr_state === "exhausted";
 
       return `
         <div class="submission" data-id="${s.id}">
@@ -270,47 +508,267 @@
               <div class="timestamp">${relTime(s.created_at)}</div>
               <div class="timestamp" style="font-size:11px;">${s.id}</div>
             </div>
-            <div><span class="state ${stateClass}">${s.ocr_state}</span></div>
+            <div><span class="state ${stateClass}">${state}</span></div>
           </div>
-          <div class="detail">
-            <div class="detail-grid">
-              <div>
-                <h3>Photo</h3>
-                <img class="detail-img" src="/uploads/${s.photo_path}" alt="">
-              </div>
-              <div>
-                <h3>OCR Result</h3>
-                ${s.ocr_state === "ready"
-                  ? `<div class="chips">${renderChips(r.numbers)}</div>
-                     <div class="kv"><b>Rotation:</b> ${r.rotation}° CW</div>
-                     <div class="kv"><b>Vision count:</b> ${r.expectedCount}</div>
-                     <div class="kv"><b>Passes:</b> ${passes.map(p => p.found).join(" / ")} found (of ${passes.map(p => p.count).join(" / ")} detected)</div>
-                     <div class="kv"><b>Completed:</b> ${relTime(s.ocr_completed_at)}</div>`
-                  : s.ocr_state === "processing"
-                    ? `<p style="color:var(--info);">Currently processing…</p>`
-                    : s.ocr_state === "pending"
-                      ? `<p style="color:var(--warning);">Queued. Worker polls every 30s.</p>`
-                      : s.ocr_state === "failed"
-                        ? `<p style="color:var(--danger);">Attempt ${s.ocr_attempts} failed. Next retry: ${s.ocr_next_retry_at ? new Date(s.ocr_next_retry_at).toLocaleString() : "—"}.</p>
-                           <div class="error-text">${escapeHtml(s.ocr_last_error || "")}</div>`
-                        : `<p style="color:var(--danger);">All ${s.ocr_attempts} attempts exhausted. Manual intervention needed.</p>
-                           <div class="error-text">${escapeHtml(s.ocr_last_error || "")}</div>`
-                }
-                ${showRetry ? `<div class="actions"><button class="btn btn-primary retry-btn">Retry now</button></div>` : ""}
-              </div>
-            </div>
-          </div>
+          <div class="detail">${renderDetail(s, state)}</div>
         </div>
       `;
     }
 
-    function escapeHtml(s) {
-      if (s == null) return "";
-      return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    function renderDetail(s, state) {
+      const r = s.ocr_result || {};
+      const passes = r.passDetails || [];
+      let panel;
+
+      if (state === "ready") {
+        // Editing the chip list for finalize
+        const chips = editedChips.has(s.id) ? editedChips.get(s.id) : [...(r.numbers || [])];
+        editedChips.set(s.id, chips);
+        panel = `
+          <h3>OCR Result (edit, then finalize)</h3>
+          <div class="detail-kv"><b>Rotation:</b> ${r.rotation}° CW · <b>Vision count:</b> ${r.expectedCount} · <b>Passes:</b> ${passes.map(p => p.found).join(" / ")} of ${passes.map(p => p.count).join(" / ")} · <b>OCR completed:</b> ${relTime(s.ocr_completed_at)}</div>
+          <div class="chips" data-chips="${s.id}">${renderChips(chips)}</div>
+          <div class="add-chip">
+            <input type="text" data-add="${s.id}" placeholder='Add missing numbers — e.g. "201, 252 283"' inputmode="text">
+            <button class="btn btn-primary" data-add-btn="${s.id}">Add</button>
+          </div>
+          <div class="add-chip-help">Comma or space separated. Click × on a chip to remove it.</div>
+          <div>
+            <label style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;display:block;">Your name (reviewer):</label>
+            <input type="text" class="reviewer-input" data-reviewer="${s.id}" placeholder="First Last" value="${escapeHtml(localStorage.getItem('tns_reviewer') || '')}">
+          </div>
+          <div class="actions">
+            <button class="btn btn-accent" data-finalize="${s.id}">Finalize Audit</button>
+            <button class="btn btn-ghost" data-reset="${s.id}">Reset Chips</button>
+          </div>`;
+      } else if (state === "finalized") {
+        const a = s.audit;
+        const b = a && a.reconciliation;
+        if (!b) {
+          panel = `<p style="color:var(--text-light);">Finalized but reconciliation data missing.</p>`;
+        } else {
+          panel = `
+            <h3>Finalized ${relTime(a.finalized_at)} by ${escapeHtml(a.finalized_by_name)}</h3>
+            <div class="detail-kv"><b>Audit:</b> ${a.id} · <b>Final chip count:</b> ${a.final_chip_list.length}</div>
+            <div class="buckets">
+              ${renderBucket("belongHere", "Belong Here", b.belongHere, v => `<span class="num">#${v.vehicle_number}</span><div class="meta">${escapeHtml(v.current_address || "")}</div>`)}
+              ${renderBucket("belongElsewhere", "Belong Elsewhere", b.belongElsewhere, v => `<span class="num">#${v.vehicle_number}</span><span class="badge">${escapeHtml(v.assigned_location)}</span><div class="meta">${escapeHtml(v.current_address || "")}</div>`)}
+              ${renderBucket("missing", "Missing", b.missing, v => `<span class="num">#${v.vehicle_number}</span><div class="meta">${escapeHtml(v.current_address || "")}</div>`)}
+              ${renderBucket("offboarded", "Offboarded / Unknown", b.offboarded, v => `<span class="num">#${v.vehicle_number}</span><div class="meta">${escapeHtml(v.reason || "")}${v.current_address ? " · " + escapeHtml(v.current_address) : ""}</div>`)}
+            </div>`;
+        }
+      } else if (state === "processing") {
+        panel = `<p style="color:var(--info);">Currently processing OCR…</p>`;
+      } else if (state === "pending") {
+        panel = `<p style="color:var(--warning);">Queued. Worker polls every 30s.</p>`;
+      } else if (state === "failed") {
+        panel = `
+          <p style="color:var(--danger);">Attempt ${s.ocr_attempts} failed. Next retry: ${s.ocr_next_retry_at ? new Date(s.ocr_next_retry_at).toLocaleString() : "—"}.</p>
+          <div class="error-text">${escapeHtml(s.ocr_last_error || "")}</div>
+          <div class="actions"><button class="btn btn-primary" data-retry="${s.id}">Retry now</button></div>`;
+      } else if (state === "exhausted") {
+        panel = `
+          <p style="color:var(--danger);">All ${s.ocr_attempts} attempts exhausted. Manual intervention needed.</p>
+          <div class="error-text">${escapeHtml(s.ocr_last_error || "")}</div>
+          <div class="actions"><button class="btn btn-primary" data-retry="${s.id}">Retry now</button></div>`;
+      } else {
+        panel = `<p>State: ${state}</p>`;
+      }
+
+      return `
+        <div class="detail-grid">
+          <div><h3>Photo</h3><img class="detail-img" src="/uploads/${s.photo_path}" alt=""></div>
+          <div>${panel}</div>
+        </div>`;
+    }
+
+    function renderChips(chips) {
+      if (!chips.length) return '<span style="color:var(--text-light);font-size:13px;font-style:italic;">No numbers yet — add some below.</span>';
+      return chips.map((n, i) => {
+        const uncertain = String(n).endsWith("?");
+        return `<span class="chip${uncertain ? " uncertain" : ""}">${escapeHtml(String(n))}<button class="remove" data-chip-idx="${i}" title="remove">×</button></span>`;
+      }).join("");
+    }
+
+    function renderBucket(key, title, items, fmt) {
+      const body = items && items.length
+        ? items.map(v => `<div class="bucket-item">${fmt(v)}</div>`).join("")
+        : `<div class="bucket-empty">None</div>`;
+      return `<div class="bucket bucket-${key}"><div class="bucket-header">${title} <span class="count">${(items || []).length}</span></div><div class="bucket-body">${body}</div></div>`;
+    }
+
+    function renderActions(actions) {
+      // Group by destination_hub for moves; for locate + remove, group by source_hub.
+      const byBucket = {};
+      actions.forEach(a => {
+        const key = a.action_type === "move" ? `Inbound → ${a.destination_hub}` : `At ${a.source_hub}`;
+        (byBucket[key] ||= []).push(a);
+      });
+      return Object.entries(byBucket).map(([key, items]) => `
+        <div class="action-group">
+          <div class="action-group-header">${escapeHtml(key)} <span class="count">${items.length}</span></div>
+          ${items.map(a => `
+            <div class="action-item">
+              <span class="action-type-${a.action_type}">${a.action_type.toUpperCase()}</span>
+              <strong>#${escapeHtml(a.vehicle_number)}</strong>
+              <span style="color:var(--text-light);">${
+                a.action_type === "move"
+                  ? "from " + escapeHtml(a.source_hub) + " → " + escapeHtml(a.destination_hub)
+                  : "at " + escapeHtml(a.source_hub)
+              }</span>
+              <span class="detail-kv">${relTime(a.created_at)}</span>
+              <span style="color:var(--text-light);font-size:11px;">${escapeHtml(a.id)}</span>
+            </div>
+          `).join("")}
+        </div>
+      `).join("");
+    }
+
+    function wireSubmissionHandlers(items) {
+      list.querySelectorAll(".submission").forEach(el => {
+        const id = el.dataset.id;
+        if (expanded.has(id)) el.classList.add("expanded");
+        el.querySelector(".row").addEventListener("click", () => {
+          el.classList.toggle("expanded");
+          if (el.classList.contains("expanded")) expanded.add(id);
+          else expanded.delete(id);
+        });
+      });
+
+      // Chip remove buttons
+      list.querySelectorAll(".chip .remove").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const submissionEl = btn.closest(".submission");
+          const id = submissionEl.dataset.id;
+          const idx = parseInt(btn.dataset.chipIdx);
+          const chips = editedChips.get(id) || [];
+          chips.splice(idx, 1);
+          editedChips.set(id, chips);
+          // Re-render just the chips for this submission
+          const chipBox = submissionEl.querySelector(`[data-chips="${id}"]`);
+          chipBox.innerHTML = renderChips(chips);
+          wireChipRemoveForSubmission(submissionEl, id);
+        });
+      });
+
+      // Add-chip button + enter on input
+      list.querySelectorAll("[data-add-btn]").forEach(btn => {
+        const id = btn.dataset.addBtn;
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          addChipsForSubmission(id);
+        });
+      });
+      list.querySelectorAll("[data-add]").forEach(input => {
+        const id = input.dataset.add;
+        input.addEventListener("keypress", e => {
+          if (e.key === "Enter") {
+            e.stopPropagation();
+            addChipsForSubmission(id);
+          }
+        });
+        input.addEventListener("click", e => e.stopPropagation());
+      });
+
+      list.querySelectorAll("[data-reviewer]").forEach(input => {
+        input.addEventListener("click", e => e.stopPropagation());
+        input.addEventListener("blur", e => {
+          localStorage.setItem("tns_reviewer", e.target.value.trim());
+        });
+      });
+
+      list.querySelectorAll("[data-reset]").forEach(btn => {
+        const id = btn.dataset.reset;
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const item = items.find(x => x.id === id);
+          if (!item) return;
+          editedChips.set(id, [...((item.ocr_result || {}).numbers || [])]);
+          refresh();
+        });
+      });
+
+      list.querySelectorAll("[data-retry]").forEach(btn => {
+        btn.addEventListener("click", async e => {
+          e.stopPropagation();
+          btn.disabled = true;
+          btn.textContent = "Retrying…";
+          await fetch(`/api/submissions/${btn.dataset.retry}/retry`, { method: "POST" });
+          setTimeout(refresh, 300);
+        });
+      });
+
+      list.querySelectorAll("[data-finalize]").forEach(btn => {
+        const id = btn.dataset.finalize;
+        btn.addEventListener("click", async e => {
+          e.stopPropagation();
+          const reviewer = document.querySelector(`[data-reviewer="${id}"]`).value.trim();
+          if (!reviewer) {
+            alert("Please enter your name as the reviewer.");
+            return;
+          }
+          const chips = editedChips.get(id) || [];
+          if (!chips.length && !confirm("No chips set. Finalize as an empty audit (all keys will be marked missing)?")) return;
+
+          btn.disabled = true;
+          btn.textContent = "Finalizing…";
+          try {
+            const res = await fetch(`/api/submissions/${id}/finalize`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chip_list: chips, finalized_by_name: reviewer }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              alert("Finalize failed: " + (data.error || res.status));
+              btn.disabled = false;
+              btn.textContent = "Finalize Audit";
+              return;
+            }
+            editedChips.delete(id);
+            await refresh();
+          } catch (err) {
+            alert("Finalize network error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "Finalize Audit";
+          }
+        });
+      });
+    }
+
+    function wireChipRemoveForSubmission(submissionEl, id) {
+      submissionEl.querySelectorAll(".chip .remove").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const idx = parseInt(btn.dataset.chipIdx);
+          const chips = editedChips.get(id) || [];
+          chips.splice(idx, 1);
+          editedChips.set(id, chips);
+          const chipBox = submissionEl.querySelector(`[data-chips="${id}"]`);
+          chipBox.innerHTML = renderChips(chips);
+          wireChipRemoveForSubmission(submissionEl, id);
+        });
+      });
+    }
+
+    function addChipsForSubmission(id) {
+      const input = document.querySelector(`[data-add="${id}"]`);
+      const raw = input.value.trim();
+      if (!raw) return;
+      const vals = raw.split(/[\s,;]+/).map(v => v.trim()).filter(Boolean);
+      const chips = editedChips.get(id) || [];
+      vals.forEach(v => { if (!chips.includes(v)) chips.push(v); });
+      editedChips.set(id, chips);
+      input.value = "";
+      const submissionEl = input.closest(".submission");
+      submissionEl.querySelector(`[data-chips="${id}"]`).innerHTML = renderChips(chips);
+      wireChipRemoveForSubmission(submissionEl, id);
     }
 
     refresh();
     setInterval(refresh, 10 * 1000);
+  })();
   </script>
 </body>
 </html>
