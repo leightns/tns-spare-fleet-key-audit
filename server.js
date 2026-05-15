@@ -631,6 +631,11 @@ app.get("/inbox", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "inbox.html"));
 });
 
+// Field-staff submission page (mobile-first, no OCR results shown).
+app.get("/submit", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "submit.html"));
+});
+
 // Serve static files with no-cache headers to prevent stale versions
 app.use(express.static(path.join(__dirname, "public"), {
   etag: false,
